@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Pixiv: Animation Converter
-// @description Converts Pixiv animation sequences to APNG files.
+// @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @include     *pixiv.net/member_illust.php?*
 // @domain      www.pixiv.net
@@ -8,6 +8,10 @@
 // @run-at      document-end
 // @grant       none
 // ==/UserScript==
+
+/* places a 'Convert to APNG' button underneath every Pixiv animation player.
+the conversion process is currently very slow, and may appear to completely
+freeze your browser. give it at least two minutes before giving up. */
 
 /*
 PROTIP: convert APNG files to WebM using FFMPEG:
@@ -23,9 +27,9 @@ the "-max_fps 60" flag affects the input decoder, is very important because the
 default maximum is too low.
 */
 
-`use strict`;
-
 /* -------------------------------------------------------------------------- */
+
+`use strict`;
 
 let enforce = console.assert;/*(X) => {
 	if (!X) {throw new Error(`enforce failed`)};
