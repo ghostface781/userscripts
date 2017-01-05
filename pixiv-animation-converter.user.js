@@ -11,10 +11,12 @@
 
 /*
 PROTIP: convert APNG files to WebM using FFMPEG:
-	> ffmpeg -i source.apng -c:v libvpx-vp9 -r 60 -lossless 1 output.webm
+> ffmpeg -max_fps 60 -i source.png -c:v libvpx-vp9 -r 60 -lossless 1 output.webm
 
-the "-r 60" flag sets the output frame rate; feel free to raise or
-lower it depending on the animation
+the "-r 60" flag sets the output frame rate; feel free to lower it.
+
+the "-max_fps 60" flag affects the input decoder, is very important because the
+default maximum is too low.
 */
 
 `use strict`;
@@ -286,10 +288,9 @@ let convert = () => new Promise((resolve, reject) => {
 			Pngs.map(unpack_png),
 			Meta.frames.map(X => X.delay)
 		);
-		console.log(`... done`);
-		console.log(`assembling APNG file ...`);
 		let ApngBytes = pack_png(ApngChunks);
 		console.log(`... done`);
+
 		resolve(ApngBytes);
 	});
 });
