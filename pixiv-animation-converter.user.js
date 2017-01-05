@@ -9,8 +9,13 @@
 // @grant       none
 // ==/UserScript==
 
-/* NOTE: DataView must be used for reading/writing PNG integers, because they
-	are stored as big-endian! */
+/*
+PROTIP: convert APNG files to WebM using FFMPEG:
+	> ffmpeg -i source.apng -c:v libvpx-vp9 -r 60 -lossless 1 output.webm
+
+the "-r 60" flag sets the output frame rate; feel free to raise or
+lower it depending on the animation
+*/
 
 `use strict`;
 
@@ -20,6 +25,8 @@ let enforce = console.assert;/*(X) => {
 	if (!X) {throw new Error(`enforce failed`)};
 };*/
 
+/* NOTE: DataView must be used for reading/writing PNG integers, because they
+	are stored as big-endian! */
 let ta_to_dv = (X) => new DataView(X.buffer, X.byteOffset, X.byteLength);
 
 let arr_eq = (A, B) => {
@@ -238,16 +245,18 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 	[Canv.width, Canv.height] = Meta.size;
 	let Ctx = Canv.getContext(`2d`);
 
-	let Pngs = [];
-	let on_png = P => {
-		Pngs.push(P);
-		if (Pngs.length === Meta.frames.length) {
+	let Pngs = new Array(Meta.frames.length);
+	let DoneCount = 0;
+	let on_png = (Idx, P) => {
+		Pngs[Idx] = P;
+		++DoneCount;
+		if (DoneCount === Meta.frames.length) {
 			resolve(Pngs);
 		};
 	};
-	let on_blob = B => {
+	let on_blob = (Idx, B) => {
 		let R = new FileReader();
-		R.addEventListener(`loadend`, () => on_png(R.result));
+		R.addEventListener(`loadend`, () => on_png(Idx, R.result));
 		R.readAsArrayBuffer(B);
 	};
 
@@ -256,7 +265,7 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 
 		for (let Idx = 0; Idx < Meta.frames.length; ++Idx) {
 			Ctx.drawImage(Zip._frameImages[Idx], 0, 0);
-			Canv.toBlob(on_blob, `image/png`);
+			Canv.toBlob(B => on_blob(Idx, B), `image/png`);
 		};
 	});
 });
