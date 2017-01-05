@@ -15,6 +15,10 @@ PROTIP: convert APNG files to WebM using FFMPEG:
 
 the "-r 60" flag sets the output frame rate; feel free to lower it.
 
+to perform lossy encoding, replace "-lossless 1" with "-crf ## -b:v 0",
+where "##" is a number from 0 to 63. lower numbers yield higher quality.
+more info: https://trac.ffmpeg.org/wiki/Encode/VP9
+
 the "-max_fps 60" flag affects the input decoder, is very important because the
 default maximum is too low.
 */
