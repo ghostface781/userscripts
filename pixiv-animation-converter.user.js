@@ -141,7 +141,7 @@ let unpack_png = (Buf /* ArrayBuffer */) => {
 	return Chunks;
 };
 
-let assemble_apng = (UnpackedPngs, FrameDelays /* array of ms durations */) => {
+let create_apng = (UnpackedPngs, FrameDelays /* array of ms durations */) => {
 	/* returns array of chunks [{Type : `????`, Bytes : <Uint8Array>}, ...] */
 	enforce(UnpackedPngs.length > 0);
 	enforce(UnpackedPngs.length === FrameDelays.length);
@@ -288,13 +288,20 @@ let convert = () => new Promise((resolve, reject) => {
 		console.log(`... done`);
 
 		console.log(`assembling APNG file ...`);
-		let ApngChunks = assemble_apng(
-			Pngs.map(unpack_png),
+
+		console.log(`... unpacking chunks ...`);
+		let UnpackedPngs = Pngs.map(unpack_png);
+
+		console.log(`... animating chunks ...`);
+		let ApngChunks = create_apng(
+			UnpackedPngs,
 			Meta.frames.map(X => X.delay)
 		);
-		let ApngBytes = pack_png(ApngChunks);
-		console.log(`... done`);
 
+		console.log(`... repacking chunks ...`);
+		let ApngBytes = pack_png(ApngChunks);
+
+		console.log(`... done`);
 		resolve(ApngBytes);
 	});
 });
@@ -342,12 +349,12 @@ let create_convert_button = () => {
 };
 
 (function() {/* entrypoint */
+	if (!pixiv.context || pixiv.context.type !== `illust` ||
+		!pixiv.context.ugokuIllustData) {return;};
+
 	enforce(ZipImagePlayer);
 	enforce(pixiv);
 	enforce(jQuery);
-
-	if (!pixiv.context || pixiv.context.type !== `illust` ||
-		!pixiv.context.ugokuIllustData) {return;};
 
 	let PlayerBox = document.querySelector(
 		`._ugoku-illust-player-container .player`);
