@@ -319,6 +319,7 @@ let create_convert_button = () => {
 	};
 
 	Btn.addEventListener(`click`, Ev => {
+		Ev.stopPropagation();
 		if (ApngBlob) {open_blob(); return;};
 		if (IsProcessing) {return;};
 
