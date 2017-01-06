@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        1.08
+// @version        1.09
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
 // @run-at         document-start
@@ -11,6 +11,15 @@
 /* -------------------------------------------------------------------------- */
 
 `use strict`;
+
+let query_xpath_all = (Expr, Root = document.body) => {
+	let Iter = document.evaluate(
+		Expr, Root, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+	let Xs = [];
+	for (let X; (X = Iter.iterateNext()); Xs.push(X)) {};
+	return Xs;
+};
+let query_xpath = (...Xs) => query_xpath_all(...Xs)[0];
 
 let move_childnodes = (Src, Dst) => {
 	while (Src.hasChildNodes()) {Dst.appendChild(Src.firstChild);};
@@ -32,6 +41,15 @@ let is_image_complete = (Img) => {
 		return Img.readyState > 0;
 	};
 	throw new Error(``);
+};
+
+let adjust_searchbar = () => {
+	let Hdr = query_xpath(`//h5[text() = 'Search']`);
+	Hdr.remove();
+	let Btn = document.querySelector(`input[value=Search]`);
+	Btn.style.width = ``;
+	let Wild = query_xpath(`//small[text() = '(Supports wildcard *)']`);
+	Btn.parentNode.insertBefore(Wild, Btn.nextSibiling);
 };
 
 let GlobalStyleRules = [
@@ -115,11 +133,10 @@ let GlobalStyleRules = [
 	`input[type=submit]:active, input[type=button]:active, button:active {
 		filter : invert(100%) hue-rotate(180deg);
 	}`,
-	`input[value=Search] {display : none !important;}`,
 
 	`#blacklisted-sidebar {display : none !important;}`,
 
-	`#tag-sidebar img {padding : 10px 0px;}`,
+	//`#tag-sidebar img {padding : 10px 0px;}`,
 	`#taglinks-container {margin-top : 10px;}`,
 	`img[src="//rule34.xxx/images/r34chibi.png"] {
 		opacity : 0.5;
@@ -146,10 +163,10 @@ let adjust_image_page = function() {
 			"text-align : initial;"+
 		"}",
 
-		".side-box {position : absolute; top : 0px;}",
-		".side-box li {list-style-type : none;}",
+		`.side-box {position : absolute; top : 0px;}`,
+		`.side-box li {list-style-type : none;}`,
 
-		".left-box {width : 135px; left : -155px;}",
+		`.left-box {width : 135px; left : -155px;}`,
 
 		".right-box {"+
 			"width : 250px;"+
@@ -158,7 +175,7 @@ let adjust_image_page = function() {
 			"background-color : rgba(0, 0, 0, 0.15);"+
 		"}",
 
-		"#note-container {position : absolute;}",
+		`#note-container {position : absolute;}`,
 		"#note-container > .note-body {"+
 			"position : absolute;"+
 			"padding : 5px;"+
@@ -170,7 +187,7 @@ let adjust_image_page = function() {
 			"cursor : pointer;"+
 			"background-color : rgba(0, 0, 0, 0.7);"+
 		"}",
-		"#note-container > .note-body > p.tn {color: gray; font-size: 0.8em;}",
+		`#note-container > .note-body > p.tn {color: gray; font-size: 0.8em;}`,
 		"#note-container > .note-box {"+
 			"position : absolute;"+
 			"height : 150px;"+
@@ -179,15 +196,15 @@ let adjust_image_page = function() {
 			"border : 1px solid black;"+
 			"cursor : move;"+
 		"}",
-		"#note-container > .note-box > .note-corner {"+
-			"position : absolute;"+
-			"height : 7px;"+
-			"width : 7px;"+
-			"right : 0;"+
-			"bottom : 0;"+
-			"background-color : black;"+
-			"cursor : se-resize;"+
-		"}",
+		`#note-container > .note-box > .note-corner {
+			position : absolute;
+			height : 7px;
+			width : 7px;
+			right : 0;
+			bottom : 0;
+			background-color : black;
+			cursor : se-resize;
+		}`,
 		`#note-container > .unsaved {
 			border : 1px solid red;
 			background-color : #FFF;
@@ -259,6 +276,8 @@ let adjust_image_page = function() {
 			right : 7px;
 		}`
 	]);
+
+	adjust_searchbar();
 
 	/* find "original image" link */
 	let OrigLink = (() => {
@@ -353,6 +372,12 @@ let adjust_image_page = function() {
 			.insertBefore(ToggleSizeBtn, OrigLink.parentNode);
 	};
 
+	/* autosize toggle hotkey */
+	document.addEventListener(`keyup`, Ev => {
+		if (Ev.key !== `0`) {return;};
+		toggle_autosize();
+	});
+
 	/* images: resize on click */
 	if (Img instanceof HTMLImageElement) {
 		Img.addEventListener(`click`, toggle_autosize);
@@ -360,7 +385,8 @@ let adjust_image_page = function() {
 
 	{/* remove original 'resize image' button */
 		let E = document.evaluate(`
-			.//h5//text()[contains(., 'Options')]/../..//a//text()[contains(., 'Resize image')]/../..
+			.//h5//text()[contains(., 'Options')]/../..//a//text()
+			[contains(., 'Resize image')]/../..
 		`, document.body, null, XPathResult.ANY_TYPE, null).iterateNext();
 		if (E) {E.parentNode.removeChild(E);};
 	};
@@ -519,6 +545,32 @@ let adjust_image_page = function() {
 	/* ad space */
 	document.getElementById(`bottom`).remove();
 
+	{/* tag configuration links */
+		let TagList = document.getElementById(`tag-sidebar`);
+		for (let TagEl of [...TagList.children]) {
+			let Name = TagEl.firstChild.textContent.replace(` `, `_`);
+			let Link = document.createElement(`a`);
+			Link.href = `/index.php?page=tags&s=list&tags=${Name}`;
+			let Icon = document.createElement(`img`);
+			Icon.src = `data:image/png;base64,
+				iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAABHNCSVQICAgIfAhk
+				iAAAAZJJREFUKJFlkDFr21AUhc+1/LDRG63B0CDjKmCIVBBeKgnSGs9djWM6dSgd
+				u3TpX2nJ0kGG+j9oUHEQdIv7zAMZ24LM3p4HGfG6KCE4Z7znwD3fId/3cS7HcW6J
+				qLHZbD6dew0AIKJXnPOb+mb0er3Atu23AAwA4JxPiegCAJoAYJrm9WQyiYUQXxhj
+				pm3bVwAQRdFdWZbK87zRYrH4qJSaG91uF6fT6R9jbOS67vs8z5dpmn5drVa/2u32
+				6+Fw+EEIke73+29PHwAYjDEzy7LfUsrHapBSJgDQ6XScul7VdBzntu58Fcfx93PI
+				7Xb7IwiCpNVq3RdFkTWIqAGAXkz1UkRERPWsRhRFd4fDYSulnD1PDQaD2LKsy+Vy
+				GQKoHhmqsixVEARTrbXe7XY/AaDf738Ow/BGCJECqJ6gOedTz/NGQojUsqzLMAwT
+				AMjz/K8QInVd9916vZ4ppebk+z6I6MI0zWul1ByAMR6P7wFQkiRvAFSc89nxePyj
+				tX5oAoDW+qEOA0BVFEVWj1EBwDMP/wFnTpz32zcEVwAAAABJRU5ErkJggg==`;
+			Icon.style.margin = `0 3px`;
+			Icon.style.verticalAlign = `bottom`;
+			Icon.style.filter = `brightness(200%)`;
+			Link.appendChild(Icon);
+			TagEl.appendChild(Link);
+		};
+	};
+
 	{/* correct note positioning */
 		let Txt = document.createTextNode(`(function() {
 			"use strict";
@@ -613,7 +665,13 @@ let adjust_gallery_page = function() {
 		`.thumb > a:visited {
 			border-bottom-color : #303a30 !important;
 		}`,
+
+		`#tag-sidebar img[src="//rule34.xxx/images/r34chibi.png"] {
+			margin-top : 1em;
+		}`,
 	]);
+
+	adjust_searchbar();
 
 	let Header = document.querySelector(`#header`);
 	if (Header) {
