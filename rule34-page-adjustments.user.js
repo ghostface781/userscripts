@@ -378,7 +378,7 @@ let adjust_image_page = function() {
 
 	/* autosize toggle hotkey */
 	document.addEventListener(`keyup`, Ev => {
-		if (Ev.key !== `0`) {return;};
+		if (Ev.code !== `Numpad0` || Ev.target !== document.body) {return;};
 		toggle_autosize();
 	});
 
