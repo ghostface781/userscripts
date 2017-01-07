@@ -14,7 +14,10 @@
 
 let query_xpath_all = (Expr, Root = document.body) => {
 	let Iter = document.evaluate(
-		Expr, Root, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+		Expr, Root, null,
+		XPathResult.ORDERED_NODE_ITERATOR_TYPE,
+		null
+	);
 	let Xs = [];
 	for (let X; (X = Iter.iterateNext()); Xs.push(X)) {};
 	return Xs;
@@ -45,6 +48,7 @@ let is_image_complete = (Img) => {
 
 let adjust_searchbar = () => {
 	let Hdr = query_xpath(`//h5[text() = 'Search']`);
+	if (!Hdr) {return;};
 	Hdr.remove();
 	let Btn = document.querySelector(`input[value=Search]`);
 	Btn.style.width = ``;
@@ -775,7 +779,8 @@ let on_document_head_loaded = function() {
 };
 
 /* delay until document fully loaded */
-document.addEventListener(`DOMContentLoaded`, function() {
+document.addEventListener(`DOMContentLoaded`, function callee() {
+	if (!document.body) {return;};
 	/* only apply to …/index.php?page=post… */
 	if (document.location.pathname !== `/index.php`) {return;};
 	let QueryTbl = {};
