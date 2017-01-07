@@ -74,7 +74,7 @@ let GlobalStyleRules = [
 
 	`body {
 		background-image : none !important;
-		background-color : ${StyleColourTbl.BgMain} !important;
+		background-color : ${StyleColourTbl.BgMain};
 	}`,
 
 	`#header * {color : #88a088 !important;}`,
@@ -156,13 +156,15 @@ let adjust_image_page = function() {
 	insert_style_rules([
 		`iframe {display : none !important;}`,
 
+		`body {
+			background-color : ${StyleColourTbl.BgAlt};
+		}`,
 		`#header, #header > * {
 			background-color : transparent !important;
 		}`,
 		`#header li {display : block;}`,
 		`#content {
 			padding : 0px !important;
-			overflow-y : hidden;
 			min-height : 100vh;
 			text-align : center;
 			background-color : ${StyleColourTbl.BgAlt};
@@ -180,6 +182,12 @@ let adjust_image_page = function() {
 			padding : 0px 20px;
 			text-align : initial;
 			background-color : ${StyleColourTbl.BgMain};
+			/* extend the background 2000vh beyond the bottom edge: */
+			box-shadow : ${
+				[...Array(20)].map((_, Idx) =>
+					"0px "+((Idx+1)*100)+"vh 0px 0px "+StyleColourTbl.BgMain
+				).join(",")
+			};
 		}`,
 
 		`.side-box {position : absolute; top : 0px;}`,
