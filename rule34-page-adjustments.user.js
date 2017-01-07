@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        1.09
+// @version        1.10
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
 // @run-at         document-start
@@ -552,9 +552,11 @@ let adjust_image_page = function() {
 	{/* tag configuration links */
 		let TagList = document.getElementById(`tag-sidebar`);
 		for (let TagEl of [...TagList.children]) {
-			let Name = TagEl.firstChild.textContent.replace(` `, `_`);
+			let Name = TagEl.firstChild.textContent.replace(/ /g, `_`);
+
 			let Link = document.createElement(`a`);
 			Link.href = `/index.php?page=tags&s=list&tags=${Name}`;
+
 			let Icon = document.createElement(`img`);
 			Icon.src = `data:image/png;base64,
 				iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAYAAABWdVznAAAABHNCSVQICAgIfAhk
@@ -570,6 +572,7 @@ let adjust_image_page = function() {
 			Icon.style.margin = `0 3px`;
 			Icon.style.verticalAlign = `bottom`;
 			Icon.style.filter = `brightness(200%)`;
+
 			Link.appendChild(Icon);
 			TagEl.appendChild(Link);
 		};
