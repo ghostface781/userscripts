@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        1.10
+// @version        1.11
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
 // @run-at         document-start
@@ -56,6 +56,11 @@ let adjust_searchbar = () => {
 	Btn.parentNode.insertBefore(Wild, Btn.nextSibiling);
 };
 
+let StyleColourTbl = {// TODO
+	BgMain : `#303a30`,
+	BgAlt : `rgb(41, 49, 41)`,
+};
+
 let GlobalStyleRules = [
 	`* {color : #c0c0c0 !important;}`,
 	`a:link, a:visited {color : #b0e0b0 !important;}`,
@@ -69,13 +74,13 @@ let GlobalStyleRules = [
 
 	`body {
 		background-image : none !important;
-		background-color : #303a30 !important;
+		background-color : ${StyleColourTbl.BgMain} !important;
 	}`,
 
 	`#header * {color : #88a088 !important;}`,
 	`#header, #header > * {
 		background-image : none !important;
-		background-color : #303030 !important;
+		background-color : #303030;
 	}`,
 	`#header #subnavbar * {color : #878787 !important;}`,
 
@@ -150,10 +155,17 @@ let GlobalStyleRules = [
 let adjust_image_page = function() {
 	insert_style_rules([
 		`iframe {display : none !important;}`,
+
+		`#header, #header > * {
+			background-color : transparent !important;
+		}`,
 		`#header li {display : block;}`,
 		`#content {
 			padding : 0px !important;
+			overflow-y : hidden;
+			min-height : 100vh;
 			text-align : center;
+			background-color : ${StyleColourTbl.BgAlt};
 		}`,
 
 		`.fit-viewport {
@@ -161,23 +173,25 @@ let adjust_image_page = function() {
 			max-height : 100vh;
 		}`,
 
-		".centre-box {"+
-			"display : inline-block;"+
-			"position : relative;"+
-			"text-align : initial;"+
-		"}",
+		`.centre-box {
+			display : inline-block;
+			position : relative;
+			min-height : inherit;
+			padding : 0px 20px;
+			text-align : initial;
+			background-color : ${StyleColourTbl.BgMain};
+		}`,
 
 		`.side-box {position : absolute; top : 0px;}`,
 		`.side-box li {list-style-type : none;}`,
 
-		`.left-box {width : 135px; left : -155px;}`,
+		`.left-box {width : 135px; left : -135px;}`,
 
-		".right-box {"+
-			"width : 250px;"+
-			"right : -300px;"+
-			"padding : 7px 10px 7px 20px;"+
-			"background-color : rgba(0, 0, 0, 0.15);"+
-		"}",
+		`.right-box {
+			width : 250px;
+			right : -280px;
+			padding : 7px 10px 7px 20px;
+		}`,
 
 		`#note-container {position : absolute;}`,
 		"#note-container > .note-body {"+
