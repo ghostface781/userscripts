@@ -17,6 +17,9 @@
 	TODO
 		test parallel requests
 		tag 'stock' popup
+
+		what happens if you set a type for a tag which doesn't exist yet?
+			should do another request to check the type again
 */
 
 /* -------------------------------------------------------------------------- */
@@ -39,15 +42,18 @@ let entrypoint = () => {
 	};
 };
 
+let PageCtrlr;
 class PageCtrlrº {
 	constructor(create_main_tagset_ctrlr) {
-		enforce(!window.TaggingToolsCtrlr);
-		window.TaggingToolsCtrlr = this;
+		enforce(!PageCtrlr);
+		PageCtrlr = this;
+
+		this.TagDescrCacheTbl = new Map();
 
 		this.MainTagSet = letx((
 			X = enforce(document.getElementById(`tag-sidebar`)),
-			TagDescrs = parse_tag_list(X),
-			Mts = create_main_tagset_ctrlr().El
+			TagDescrs = this.parse_tag_list(X),
+			Mts = create_main_tagset_ctrlr.call(this).El
 		) => (
 			TagDescrs.length ||
 				console.warn(`main tag set is empty`),
@@ -94,13 +100,61 @@ class PageCtrlrº {
 		/* remove the original tag list header */
 		query_xpath(`../h5/text()[.="Tags"]/..`, this.MainTagSet).remove();
 	};
+
+	parse_tag_list(TagList) {
+		/* returns a sorted array of tag descriptors */
+		/* also caches tag descriptors */
+
+		enforce(TagList.tagName === `UL`);
+	
+		let descr_from = (X) => Object.freeze({
+			Name : X.querySelector(
+				`a[href^="index.php?page=post&s=list&tags="]`)
+				.textContent
+				.trim()
+				.replace(/ /g, `_`)
+				.toLowerCase()
+			,
+			Type : [...X.classList]
+				.find((C) => C.startsWith(`tag-type-`))
+				.replace(/^tag-type-/, ``)
+				.toLowerCase()
+			,
+			Count : parseInt(/* sometimes this element is empty */
+				[...X.querySelectorAll(`span`)]
+					.find((Y) => /^\d*$/.test(Y.textContent.trim()))
+					.textContent
+			) || 0,
+		});
+	
+		let NameSet = new Set();
+	
+		let Xs = (for (X of TagList.children)
+			if (X.tagName === `LI` && X.hasChildNodes())
+			descr_from(X)
+		);
+	
+		return [for (X of Xs)
+			if (!NameSet.has(X.Name)) /* remove duplicates */
+			(
+				NameSet.add(X.Name),
+				this.TagDescrCacheTbl.set(X.Name, X),
+				X
+			)
+		];
+	};
 };
 
 class ImagePageCtrlrº extends PageCtrlrº {
 	constructor(ImageId) {
-		super(() => new ImageTagSetCtrlrº(ImageId));
-		this.ImageId = ImageId;
-		this.EditForm = enforce(document.getElementById(`edit_form`));
+		super(function() (
+			this.EditForm = enforce(document.getElementById(`edit_form`)),
+			this.ImageMetaTbl = Object.assign(
+				parse_edit_form(this.EditForm),
+				{TagSet : undefined}),
+			enforce(ImageId === this.ImageMetaTbl.Id),
+			new ImageTagSetCtrlrº(this.ImageMetaTbl)
+		));
 
 		this.MainTagSet.Ctrlr.mark_clean();
 
@@ -108,13 +162,12 @@ class ImagePageCtrlrº extends PageCtrlrº {
 			`//li/text()[contains(., "Source:")]/..`,
 			document.getElementById(`stats`)
 		);
-		let SourceTxt = this.EditForm.querySelector(`input#source`).value;
 	};
 };
 
 class GalleryPageCtrlrº extends PageCtrlrº {
 	constructor() {
-		super(() => new GalleryTagSetCtrlrº());
+		super(function() new GalleryTagSetCtrlrº());
 	};
 };
 
@@ -183,6 +236,7 @@ class SearchBarCtrlrº {
 class TagSetCtrlrº {
 	constructor() {
 		this.PendingRequCount = 0;
+		this.TagTbl = new Map();
 
 		this.El = document.createElement(`ul`);
 		this.El.Ctrlr = this;
@@ -204,15 +258,14 @@ class TagSetCtrlrº {
 			this.apply_tag_type(X.Name, X.Type);
 		}, true);
 
-		window.addEventListener(`focus`, () => this.on_pref_update());
-		window.addEventListener(`blur`, () => this.on_pref_update());
+		for (let X of [`:pref-update`, `focus`, `blur`,]) {
+			window.addEventListener(X, () => this.on_pref_update());
+		};
 
 		this.Status = {Disp : `hide`};
 	};
 
-	get Tags() {return this.El.querySelectorAll(`:scope > li`);};
-
-	q(X) {return this.El.getElementsByClassName(`tags-${X}`)[0];};
+	_q(X) {return this.El.getElementsByClassName(`tags-${X}`)[0];};
 
 	on_search_query_update(QueryTbl) {
 		for (let Li of this.Tags) {
@@ -225,38 +278,33 @@ class TagSetCtrlrº {
 		;
 	};
 
+	get Tags() {return this.TagTbl.values(); /* iterator, not random access */};
+
 	assoc(Descr) {
+		enforce(Descr.Name);
+
+		let create_tag = () => {
+			let Tag = (new TagCtrlrº(Descr)).El;
+			this.TagTbl.set(Descr.Name, Tag);
+			return Tag;
+		};
+
 		/* maintain sorted order */
-		if (![].some.call(this.Tags, (Tag) => {
+		for (let Tag of this.Tags) {
 			let Rel = Descr.Name.localeCompare(Tag.Ctrlr.TagDescr.Name);
 
 			if (Rel === 0) {/* replace tag */
-				Tag.Ctrlr.TagDescr = Descr;
-				return true;
+				Tag.Ctrlr.update_descr(Descr);
+				return;
 
 			} else if (Rel < 0) {/* insert new tag */
-				Tag.insertAdjacentElement(`beforebegin`,
-					(new TagCtrlrº(Descr)).El);
-				return true;
-			};
-
-		})) {/* append new tag */
-			this.q(`footer`).insertAdjacentElement(`beforebegin`,
-				(new TagCtrlrº(Descr)).El);
-		};
-
-		this.El.dispatchEvent(new CustomEvent(`:mutated`, {}));
-	};
-
-	dissoc(Name) {
-		/* remove a tag if it exists */
-		for (let Tag of this.Tags) {
-			if (Tag.Ctrlr.TagDescr.Name === Name) {
-				Tag.remove();
+				Tag.insertAdjacentElement(`beforebegin`, create_tag());
+				return;
 			};
 		};
 
-		this.El.dispatchEvent(new CustomEvent(`:mutated`, {}));
+		/* append new tag */
+		this._q(`footer`).insertAdjacentElement(`beforebegin`, create_tag());
 	};
 
 	apply_tag_type(Name, Type) {
@@ -271,19 +319,25 @@ class TagSetCtrlrº {
 			Method : `post`,
 			Mime : `application/x-www-form-urlencoded`,
 			Body : X,
-
-		}).then((Resp) => {
+		}).then((Resp) => (
+			enforce(Resp.ok),
+			Resp
+		)).then((Resp) => {
+			PageCtrlr.TagDescrCacheTbl
+				.set(Name, Object.assign({},
+					PageCtrlr.TagDescrCacheTbl.get(Name),
+					{Type : Type}));
 			this.assoc({Name : Name, Type : Type,});
 			this.Status = {
 				Disp : `success`,
-				Msg : `Tag type \u2192 '${Type}' for '${Name}'`,
+				Msg : `Tag type \u2192 ${Type} ('${Name}')`,
 			};
-
 		}, (Xcep) => {
 			this.Status = {
 				Disp : `warn`,
-				Msg : `Error setting tag type for '${Name}'`,
+				Msg : `Error saving tag type for '${Name}'`,
 			};
+			Xcep;
 		});
 	};
 
@@ -303,22 +357,22 @@ class TagSetCtrlrº {
 				referrer : `no-referrer`,
 				referrerPolicy : `no-referrer`,
 
-			}).then((Resp) => {
+			}).then(Resp => {
 				enforce(Number.isSafeInteger(this.PendingRequCount) &&
 					this.PendingRequCount > 0);
 
 				--this.PendingRequCount;
 				this.El.classList.toggle(
-					`tags-requ-pending`, this.PendingRequCount);
+					`tags-requ-pending`, !!this.PendingRequCount);
 
-				enforce(Resp.ok,
-					`${Method} request failed with status ${Resp.status} `+
-					`("${Addr}")`
-				);
+				enforce([`basic`, `opaqueredirect`].includes(Resp.type));
+				console.log(
+					`${Method} request completed with status ${Resp.status} `+
+					`("${Addr}")`);
 
 				resolve(Resp);
 
-			}).catch((Xcep) => {
+			}).catch(Xcep => {
 				console.error(Xcep);
 				reject(Xcep);
 			});
@@ -332,56 +386,151 @@ class TagSetCtrlrº {
 
 	set Status({Disp, Msg = ``,}) {
 		enforce([`success`, `info`, `warn`, `none`, `hide`].includes(Disp));
-		this.q(`status`).textContent = Msg;
-		this.q(`status`).setAttribute(`disposition`, Disp);
+		this._q(`status`).textContent = Msg;
+		this._q(`status`).setAttribute(`disposition`, Disp);
 	};
 };
 
 class ImageTagSetCtrlrº extends TagSetCtrlrº {
-	constructor(ImageId) {
+	constructor(ImageMetaTbl) {
 		super();
 
 		this.El.classList.add(`tags-editable`);
-		this.ImageId = ImageId;
+		this.ImageMetaTbl = ImageMetaTbl;
 		this.RemoteTags = null;
 
-		this.q(`spinner`).insertAdjacentHTML(`afterend`, `
-			<figure class="tags-refresh" title="Refresh tags"></figure>
+		this._q(`spinner`).insertAdjacentHTML(`beforebegin`, `
 			<figure class="tags-togglectrls"></figure>
+			<figure class="tags-refresh" title="Refresh tags"></figure>
 			<button class="tags-apply" type="button">Apply</button>
 			<button class="tags-discard" type="button">Cancel</button>
 		`);
 
-		this.q(`footer`).insertAdjacentHTML(`beforeend`, `
+		this._q(`footer`).insertAdjacentHTML(`beforeend`, `
 			<div class="tags-add-form">
 				<figure class="tags-add-btn" title="Add tag"></figure>
-				<input type="text"></input>
+				<div>
+					<textarea class="tags-add-field"
+						rows="1" autocomplete="off"></textarea>
+					<ul class="tags-add-footer">
+						<li><kbd>tab</kbd> autocomplete</li>
+					</ul>
+				</div>
 			</div>
 		`);
 
 		delete_whitenodes(this.El);
 
-		this.El.addEventListener(`:mutated`, () => {
-			//
+		this._q(`apply`).addEventListener(`DOMActivate`, () =>
+			this.apply_tag_proposals());
+
+		this._q(`discard`).addEventListener(`DOMActivate`, () =>
+			this.discard_tag_proposals());
+
+		this._q(`refresh`).addEventListener(`mousedown`, (Ev) => {
+			if (Ev.button !== 0) {return;};
+			this.refresh();
 		});
 
-		this.q(`togglectrls`).addEventListener(`mousedown`, (Ev) => {
+		this._q(`togglectrls`).addEventListener(`mousedown`, (Ev) => {
 			if (Ev.button !== 0) {return;};
 			GM_setValue(`tagset-show-extra-controls`,
 				!GM_getValue(`tagset-show-extra-controls`, false));
-			this.on_pref_update();
+			window.dispatchEvent(new CustomEvent(`:pref-update`, {}));
+		});
+
+		this._q(`add-field`).addEventListener(`keydown`, (Ev) => {
+			if (Ev.key === `Enter`) {
+				if (Ev.altKey || Ev.ctrlKey || Ev.metaKey || Ev.shiftKey) {
+					return;};
+				this.on_tag_add_form_submit();
+			};
+		});
+
+		this._q(`add-field`).addEventListener(`input`, ({
+			currentTarget : X,
+		}) => {
+			if (X.selectionStart !== X.selectionEnd) {return;};
+
+			/* combine contiguous whitespace into a single linebreak */
+
+			let Pre = X.value.slice(0, X.selectionStart);
+			let Post = X.value.slice(X.selectionStart);
+
+			Pre = Pre.replace(/\s+/g, `\n`);
+			Post = Post.replace(/\s+/g, `\n`);
+			if (Pre.slice(-1) === `\n` && Post[0] === `\n`) {
+				Post = Post.slice(1);
+			};
+
+			X.value = Pre+Post;
+			X.selectionStart = Pre.length;
+			X.selectionEnd = Pre.length;
+
+			if (/^\s+$/.test(X.value)) {
+				X.value = ``;};
+
+			X.rows = 1 + (X.value.match(/\n/g) || []).length;
+		});
+
+		this._q(`add-field`).addEventListener(`mousedown`, (Ev) => {
+			let {detail : ClickCount, currentTarget : X} = Ev;
+
+			if (ClickCount === 3) {/* tripleclick */
+				Ev.preventDefault();
+				/* select all */
+				X.selectionStart = 0;
+				X.selectionEnd = X.value.length;
+			};
+
+			//if (ClickCount === 2) {/* doubleclick */
+			//	setTimeout(() => {
+			//		let SelTxt = X.value.slice(X.selectionStart, X.selectionEnd);
+			//		if (/\s/.test(SelTxt)) {return;};
+	
+					/* grow selection to whitespace boundaries */
+			//		while (!/\s/.test(X.value[X.selectionStart - 1] || ` `)) {
+			//			--X.selectionStart;};
+			//		while (!/\s/.test(X.value[X.selectionEnd] || ` `)) {
+			//			++X.selectionEnd;};
+			//	});
+
+			//};
+		});
+
+		this.El.addEventListener(`:tag-toggle`, ({detail : Descr}) => {
+			enforce(this.TagTbl.has(Descr.Name));
+			if (Descr.Proposal === `dissoc`) {
+				this.assoc(Descr);
+			} else {
+				this.dissoc(Descr.Name);
+			};
+		}, true);
+
+		this.El.addEventListener(`:tag-edit`, ({detail : Descr}) => {
+			enforce(this.TagTbl.has(Descr.Name));
+
+			/* edit a tag: dissoc it from the set, append it to the textarea */
+			this.dissoc(Descr.Name);
+			letx((X = this._q(`add-field`)) => {
+				if (/[^\s]+/.test(X.value)) {X.value += ` `;};
+				X.value += Descr.Name;
+				X.focus();
+				X.scrollIntoView(false);
+				X.dispatchEvent(new InputEvent(`input`));
+			});
+		}, true);
+
+		this.El.addEventListener(`:tags-mutated`, () => {
+			this.El.classList.toggle(`tags-proposed`,
+				!!(for (X of this.Tags)
+					if (X.Ctrlr.TagDescr.Proposal)
+					true
+				).next().value
+			);
 		});
 
 		this.on_pref_update();
-	};
-
-	on_pref_update() {
-		super.on_pref_update();
-		letx((X = GM_getValue(`tagset-show-extra-controls`, false)) => (
-			this.El.classList.toggle(`tags-extractrls`, X),
-			this.q(`togglectrls`).title =
-				`${X ? "Hide" : "Show"} extra controls`
-		));
 	};
 
 	mark_clean() {
@@ -391,7 +540,185 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 				if (X.Ctrlr.TagDescr)
 				X.Ctrlr.TagDescr.Name));
 
-		this.El.dispatchEvent(new CustomEvent(`:mutated`, {}));
+		for (let X of this.Tags) {
+			X.Ctrlr.update_descr({Proposal : null});
+		};
+
+		this.El.dispatchEvent(new CustomEvent(`:tags-mutated`, {}));
+	};
+
+	assoc(Descr) {
+		Descr = Object.assign({}, Descr);
+		delete Descr.Proposal;
+
+		let Tag = this.TagTbl.get(Descr.Name);
+		if (Tag) {/* already present */
+			if (Tag.Ctrlr.TagDescr.Proposal === `dissoc`) {
+				Descr = Object.assign({}, Descr, {Proposal : null});
+			};
+			Tag.Ctrlr.update_descr(Descr);
+
+		} else {
+			if (this.RemoteTags && !this.RemoteTags.has(Descr.Name)) {
+				/* mark as proposed add */
+				Descr = Object.assign({}, Descr, {Proposal : `assoc`});
+			};
+			super.assoc(Descr);
+		};
+
+		this.El.dispatchEvent(new CustomEvent(`:tags-mutated`, {}));
+	};
+
+	dissoc(Name) {
+		let Tag = this.TagTbl.get(Name);
+		if (Tag) {
+			if (this.RemoteTags && this.RemoteTags.has(Name)) {
+				/* mark as proposed delete */
+				Tag.Ctrlr.update_descr({Proposal : `dissoc`});
+			} else {
+				this._raw_dissoc(Name);
+			};
+		};
+
+		this.El.dispatchEvent(new CustomEvent(`:tags-mutated`, {}));
+	};
+
+	_raw_dissoc(Name) {
+		let X = this.TagTbl.get(Name);
+		if (X) {
+			X.remove();
+			this.TagTbl.delete(Name);
+		};
+	};
+
+	discard_tag_proposals() {
+		for (let X of [...this.Tags]) {
+			if (!this.RemoteTags.has(X.Ctrlr.TagDescr.Name)) {
+				this._raw_dissoc(X.Ctrlr.TagDescr.Name);
+			} else {
+				X.Ctrlr.update_descr({Proposal : null});
+			};
+		};
+
+		this.El.dispatchEvent(new CustomEvent(`:tags-mutated`, {}));
+	};
+
+	apply_tag_proposals() {
+		enforce(Number.isSafeInteger(this.ImageMetaTbl.Id));
+
+		declare_recent_tags(...
+			(for (X of this.Tags) // bugzilla #980828
+				if (X.Ctrlr.TagDescr.Proposal === `assoc`)
+				X.Ctrlr.TagDescr.Name));
+
+		let X = new URLSearchParams(``);
+		X.set(`id`, this.ImageMetaTbl.Id);
+		X.set(`submit`, `Save changes`);
+		X.set(`pconf`, this.ImageMetaTbl.Pconf);
+		X.set(`lupdated`, this.ImageMetaTbl.Lupdated);
+		X.set(`rating`, this.ImageMetaTbl.Rating);
+		X.set(`title`, this.ImageMetaTbl.Title);
+		X.set(`parent`, this.ImageMetaTbl.Parent);
+		X.set(`next_post`, this.ImageMetaTbl.NextId);
+		X.set(`previous_post`, this.ImageMetaTbl.PrevId);
+		X.set(`source`, this.ImageMetaTbl.Source);
+		X.set(`tags`,
+			[for (X of this.Tags) // bugzilla #980828
+				if (X.Ctrlr.TagDescr.Proposal !== `dissoc`)
+				X.Ctrlr.TagDescr.Name]
+			.join(` `));
+
+		this.http_request({
+			Addr : `/public/edit_post.php`,
+			Method : `post`,
+			Mime : `application/x-www-form-urlencoded`,
+			Body : X,
+		}).then((Resp) => (
+			enforce(Resp.ok || Resp.type === `opaqueredirect`),
+			Resp
+		)).then((Resp) => {
+			[for (X of this.Tags)
+				if (X.Ctrlr.TagDescr.Proposal === `dissoc`)
+				this._raw_dissoc(X.Ctrlr.TagDescr.Name)];
+			this.mark_clean();
+
+			this.Status = {
+				Disp : `success`,
+				Msg : `Tags saved`,
+			};
+		}, (Xcep) => {
+			this.Status = {
+				Disp : `warn`,
+				Msg : `Error saving tags for #${this.ImageMetaTbl.Id}`,
+			};
+		}).catch((Xcep) => {
+			this.Status = {
+				Disp : `warn`,
+				Msg : `Internal error`,
+			};
+			throw Xcep;
+		});
+	};
+
+	refresh() {
+		enforce(Number.isSafeInteger(this.ImageMetaTbl.Id));
+
+		this.http_request({
+			Addr : `/index.php?page=post&s=view&id=${this.ImageMetaTbl.Id}`,
+			Method : `get`,
+		}).then((Resp) =>
+			Resp.blob()
+		).then((B) =>
+			blob_to_doc(B)
+		).then((Doc) =>
+			Promise.resolve(
+				PageCtrlr.parse_tag_list(enforce(
+					Doc.getElementById(`tag-sidebar`))))
+
+		).then((Descrs) => {
+			/* replace the whole tag set */
+			[for (X of this.Tags)
+				X.remove()];
+			this.TagTbl = new Map();
+			[for (X of Descrs)
+				super.assoc(X)];
+			this.mark_clean();
+
+			this.Status = Descrs.length ?
+				{Disp : `none`, Msg : `Tags refreshed`,}
+			:
+				{Disp : `warn`,
+					Msg : `No tags found for #${this.ImageMetaTbl.Id}`,}
+			;
+
+		}, (Xcep) => {
+			this.Status = {
+				Disp : `warn`,
+				Msg : `Error fetching tags for #${this.ImageMetaTbl.Id}`,
+			};
+		}).catch((Xcep) => {
+			this.Status = {
+				Disp : `warn`,
+				Msg : `Internal error`,
+			};
+			throw Xcep;
+		});
+	};
+
+	on_pref_update() {
+		super.on_pref_update();
+		letx((X = GM_getValue(`tagset-show-extra-controls`, false)) => (
+			this.El.classList.toggle(`tags-extractrls`, X),
+			this._q(`togglectrls`).title =
+				`${X ? "Hide" : "Show"} extra controls`
+		));
+	};
+
+	on_tag_add_form_submit() {
+		letif(this._q(`add-field`).value.match(/[^\s]+/g), Words => {
+			[for (X of Words) this.assoc({Name : X})];
+			this._q(`add-field`).value = ``;
+		});
 	};
 };
 
@@ -404,7 +731,7 @@ class GalleryTagSetCtrlrº extends TagSetCtrlrº {
 };
 
 class TagCtrlrº {
-	constructor(TagDescr /* optional */) {
+	constructor(TagDescr) {
 		this.El = document.createElement(`li`);
 		this.El.Ctrlr = this;
 		this.El.classList.add(`tag`);
@@ -436,7 +763,7 @@ class TagCtrlrº {
 			</form>
 		`);
 
-		let CtrlsBox = this.q(`ctrls`);
+		let CtrlsBox = this._q(`ctrls`);
 		for (let Xª of TagCtrlrº.ControlButtonDescrs) {
 			let X = Xª; // bugzilla 1101653
 
@@ -458,18 +785,24 @@ class TagCtrlrº {
 
 		delete_whitenodes(this.El);
 
-		this.q(`type-options`).addEventListener(`change`, (Ev) => {
+		this._q(`type-options`).addEventListener(`change`, (Ev) => {
 			/* enable apply only when selected type differs from current type */
-			this.q(`config-apply-btn`).disabled = Ev.currentTarget
-				.querySelector(`input[value="${this.TagDescr.Type}"]`).checked;
+			if (this.TagDescr.Type === `unknown`) {
+				this._q(`config-apply-btn`).disabled =
+					!Ev.currentTarget.querySelector(`input:checked`);
+			} else {
+				this._q(`config-apply-btn`).disabled =
+					!!Ev.currentTarget.querySelector(
+						`input[value="${this.TagDescr.Type}"]:checked`);
+			};
 		}, true);
 
-		this.q(`config-form`).addEventListener(`submit`, (Ev) => {
+		this._q(`config-form`).addEventListener(`submit`, (Ev) => {
 			Ev.preventDefault();
 			let X = {
 				Name : this.TagDescr.Name,
 				Type : (
-					for (X of this.q(`type-options`)
+					for (X of this._q(`type-options`)
 						.querySelectorAll(`input`))
 					if (X.checked)
 					X.value
@@ -485,12 +818,10 @@ class TagCtrlrº {
 
 		this.ConfigFormIsOpen = false;
 
-		if (TagDescr) {
-			this.TagDescr = TagDescr;
-		};
+		this.update_descr(TagDescr);
 	};
 
-	q(X) {return this.El.getElementsByClassName(`tag-${X}`)[0];};
+	_q(X) {return this.El.getElementsByClassName(`tag-${X}`)[0];};
 
 	static get ControlButtonDescrs() {return [
 		{Name : `config`, Title : `Configure tag`, State : `off`,
@@ -510,57 +841,75 @@ class TagCtrlrº {
 		},
 		{Name : `toggle`, Title : ``, State : `on`, Type : `edit`,
 			on_action : function(Ev) {
-				//
+				this.El.dispatchEvent(new CustomEvent(`:tag-toggle`, {
+					detail : this.TagDescr,
+					bubbles : true,
+				}));
 			},
 		},
 		{Name : `edit`, Title : `Edit tag`, State : `on`, Type : `edit`,
 			on_action : function(Ev) {
-				//
+				this.El.dispatchEvent(new CustomEvent(`:tag-edit`, {
+					detail : this.TagDescr,
+					bubbles : true,
+				}));
 			},
 		},
 	];};
 
 	get TagDescr() {return this._TagDescr;};
 
-	set TagDescr(X) {
-		/* retain unspecified fields */
-		X = Object.assign({}, this._TagDescr, X);
-		this._TagDescr = X;
+	update_descr(X) {
+		/* retain unspecified fields, or use cached values */
+		X = Object.assign(
+			{},
+			PageCtrlr.TagDescrCacheTbl.get(
+				X.Name || this._TagDescr.Name) || {},
+			this._TagDescr,
+			X
+		);
+		X.Type = X.Type || `unknown`;
+		this._TagDescr = Object.freeze(X);
 
+		this.El.setAttribute(`tag-name`, X.Name);
 		this.El.setAttribute(`tag-type`, X.Type);
 		[for (C of this.El.classList)
 			if (C.startsWith(`tag-type-`))
 			this.El.classList.remove(C)]
 		this.El.classList.add(`tag-type-${X.Type}`);
 
-		letx((A = this.q(`link`)) => {
+		letx((A = this._q(`link`)) => {
 			A.href = `/index.php?page=post&s=list&tags=${X.Name}`;
 			A.textContent = X.Name.replace(/_/g, ` `);
 		});
 
-		this.q(`count`).textContent = X.Count;
+		this._q(`count`).textContent =
+			Number.isSafeInteger(X.Count) ? X.Count : ``;
 
-		letx((O = this.q(`type-options`)) => {
-			O.querySelector(`input[value="${X.Type}"]`)
-				.checked = true;
+		letx((O = this._q(`type-options`)) => {
+			letif(O.querySelector(`input[value="${X.Type}"]`), X =>
+				X.checked = true);
 			O.dispatchEvent(new Event(`change`, {bubbles : true}));
 		});
+
+		this.El.classList.toggle(`tag-added`, X.Proposal === `assoc`);
+		this.El.classList.toggle(`tag-deleted`, X.Proposal === `dissoc`);
 	};
 
 	get ConfigFormIsOpen() {return !!this._ConfigFormIsOpen;};
 
 	set ConfigFormIsOpen(X) {
 		this.El.classList.toggle(`tag-config-is-open`, X);
-		this.q(`config-btn`).setAttribute(`state`, X ? `on` : `off`);
-		this.q(`config-form`).setAttribute(`state`, X ? `open` : `closed`);
+		this._q(`config-btn`).setAttribute(`state`, X ? `on` : `off`);
+		this._q(`config-form`).setAttribute(`state`, X ? `open` : `closed`);
 		this._ConfigFormIsOpen = !!X;
 	};
 
 	set SearchQueryStatus(Status) {
 		enforce([`include`, `exclude`, null, undefined].includes(Status));
-		this.q(`searchin-btn`).setAttribute(
+		this._q(`searchin-btn`).setAttribute(
 			`state`, Status === `include` ? `on` : `off`);
-		this.q(`searchex-btn`).setAttribute(
+		this._q(`searchex-btn`).setAttribute(
 			`state`, Status === `exclude` ? `on` : `off`);
 	};
 
@@ -577,43 +926,34 @@ class TagCtrlrº {
 	};
 };
 
-let parse_tag_list = (TagList) => {
-	/* returns an iterator yielding tag descriptors */
-	enforce(TagList.tagName === `UL`);
+let parse_edit_form = (Form) => ({
+	Id : parseInt(Form.querySelector(`input[name="id"]`).value),
+	NextId : parseInt(Form.querySelector(`#next_post`).value),
+	PrevId : parseInt(Form.querySelector(`#previous_post`).value),
+	ParentId : parseInt(Form.querySelector(`input[name="parent"]`).value),
+	Title : Form.querySelector(`#title`).value,
+	Rating : Form.querySelector(`input[name="rating"]:checked`).value,
+	Source : Form.querySelector(`#source`).value,
+	TagSet : new Set(Form.querySelector(`#tags`).value.match(/[^\s]+/)),
+	Pconf : Form.querySelector(`#pconf`).value,
+	Lupdated : Form.querySelector(`#lupdated`).value,
+});
 
-	let descr_from = (X) => ({
-		Name : X.querySelector(`a[href^="index.php?page=post&s=list&tags="]`)
-			.textContent
-			.trim()
-			.replace(/ /g, `_`)
-			.toLowerCase()
-		,
-		Type : [...X.classList]
-			.find((C) => C.startsWith(`tag-type-`))
-			.replace(/^tag-type-/, ``)
-			.toLowerCase()
-		,
-		Count : parseInt(
-			[...X.querySelectorAll(`span`)]
-				.find((Y) => /^\d+$/.test(Y.textContent.trim()))
-				.textContent
-		),
-	});
+let get_recent_tags = () => {
+	return JSON.parse(GM_getValue(`recent-tags`, `[]`));
+};
 
-	let NameSet = new Set();
+let declare_recent_tags = (...Names /* (oldest, …, newest) */) => {
+	let Xs = get_recent_tags();
+	[for
+		(Idx of (for (X of Names)
+			Xs.indexOf(X)))
+		if (Idx !== -1)
+		Xs.splice(Idx, 1)];
+	Xs.push(...Names);
+	GM_setValue(`recent-tags`, JSON.stringify(Xs));
 
-	let Xs = (for (X of TagList.children)
-		if (X.tagName === `LI` && X.hasChildNodes())
-		X.TagDescr ? X.TagDescr : descr_from(X) /* reuse if cached */
-	);
-
-	Xs = [for (X of Xs)
-		if (!NameSet.has(X.Name)) /* remove duplicates */
-		(NameSet.add(X.Name), X)
-	];
-
-	return Xs.sort((X, Y) =>
-		X.Name < Y.Name ? -1 : X.Name > Y.Name ? 1 : 0);
+	window.dispatchEvent(new CustomEvent(`:pref-update`, {}));
 };
 
 /* --- miscellaneous --- */
@@ -622,7 +962,10 @@ let letx = (f) => f();
 let letif = (X, f) => X ? f(X) : undefined;
 
 let enforce = (Cond, Msg) => {
-	if (!Cond) {throw new Error(Msg);};
+	if (!Cond) {
+		let X = new Error();
+		throw new Error(`${Msg} | ${X.stack}`);
+	};
 	return Cond;
 };
 
@@ -680,15 +1023,35 @@ let delete_whitenodes = (Root) => {
 	};
 };
 
+let blob_to_doc = (Src) => new Promise((resolve, reject) => {
+	let Url = (Src instanceof Blob) ?
+		URL.createObjectURL(Src)
+	: (typeof Src === `string`)
+		Src;
+
+	let X = new XMLHttpRequest();
+
+	X.addEventListener(`loadend`, () => {
+		if (X.readyState !== 4 || X.status !== 200) {reject();};
+		resolve(X.response);
+	});
+
+	X.open(`GET`, Url, true);
+	X.responseType = `document`;
+	X.send();
+});
+
 /* --- assets --- */
 
 let global_style_rules = () => [
 	`* {
 		--c-ctrl-hi : #5CCD7F;
-		--c-ctrl-bg : rgba(255,255,255,0.4);
+		--c-ctrl-bg : rgba(255, 255, 255, 0.4);
+		--c-ctrl-bg-dark : rgba(0, 0, 0, 0.12);
 		--c-tag-artist : #a00;
 		--c-tag-character : #0a0;
 		--c-tag-copyright : #a0a;
+		--c-tag-unknown : #333;
 		--ff-narrow : "tahoma", "trebuchet ms", "arial", sans-serif;
 	}`,
 
@@ -720,6 +1083,12 @@ let global_style_rules = () => [
 		background-color : #ccc;
 	}`,
 
+	`.tag, .tags-footer {
+		border-left : 2px solid transparent;
+		margin-left : -0.2em !important;
+		padding-left : 0.24em;
+	}`,
+
 	/* --- tagset header --- */
 
 	`.tags-header {
@@ -736,21 +1105,24 @@ let global_style_rules = () => [
 		margin-right : 0.5em;
 	}`,
 
-	`.tagset:not(.tags-modified) .tags-apply,
-		.tagset:not(.tags-modified) .tags-discard,
-		.tagset.tags-modified .tags-title,
-		.tagset.tags-modified .tags-togglectrls,
-		.tagset.tags-modified .tags-refresh
+	`.tagset:not(.tags-proposed) .tags-apply,
+	.tagset:not(.tags-proposed) .tags-discard,
+	.tagset.tags-proposed .tags-title,
+	.tagset.tags-proposed .tags-refresh {
+		display : none;
+	}`,
+
+	`.tagset.tags-editable:hover .tags-title,
+	.tagset.tags-requ-pending .tags-title,
+	.tagset:not(:hover) .tags-refresh,
+	.tagset.tags-requ-pending .tags-refresh,
+	.tagset:not(.tags-requ-pending) .tags-spinner,
+	.tagset:not(:hover):not(.tags-requ-pending):not(.tags-proposed)
+		.tags-togglectrls
 	{
 		display : none;
 	}`,
 
-	`.tagset.tags-requ-pending .tags-refresh,
-		.tagset:not(.tags-requ-pending) .tags-spinner {
-		/* replace refresh button with spinner while requesting */
-		display : none;
-
-	}`,
 	`.tags-refresh, .tags-spinner, .tags-togglectrls {
 		width : 16px;
 		height : 16px;
@@ -806,7 +1178,7 @@ let global_style_rules = () => [
 		white-space : nowrap;
 
 		font-family : var(--ff-narrow);
-		background-color : rgba(0, 0, 0, 0.12);
+		background-color : var(--c-ctrl-bg-dark);
 		background-repeat : no-repeat;
 		background-position-x : 0.3em;
 		background-position-y : center;
@@ -815,7 +1187,7 @@ let global_style_rules = () => [
 	`.tags-status:hover {
 		position : fixed;
 		overflow : visible;
-		background-color : white;
+		background-color : rgba(255, 255, 255, 0.75);
 	}`,
 
 	`.tags-status[disposition="hide"] {
@@ -842,7 +1214,6 @@ let global_style_rules = () => [
 
 	`.tags-footer {
 		margin-top : 0.6em;
-		margin-left : calc(2px + 0.01em);
 	}`,
 
 	`.tags-add-form {
@@ -852,6 +1223,7 @@ let global_style_rules = () => [
 	`.tags-add-btn {
 		margin : 0;
 		margin-right : 0.3em;
+		margin-top : 0.1em;
 		width : 16px;
 		height : 16px;
 		border-radius : 3px;
@@ -883,12 +1255,31 @@ let global_style_rules = () => [
 		filter : saturate(0%) opacity(50%);
 	}`,
 
+	`.tags-add-field {
+		overflow-wrap : normal;
+		word-break : keep-all;
+	}`,
+
+	`.tags-add-footer {
+		padding : 0.2em 1em;
+		border-radius : 0 0 8px 8px;
+		color : var(--c-tag-unknown);
+		background-color : var(--c-ctrl-bg);
+	}`,
+
+	`.tags-add-field:not(:focus) ~ .tags-add-footer {
+		display : none;
+	}`,
+
+	`.tags-add-footer kbd {
+		border : 1px solid currentColor;
+		border-radius : 3px;
+	}`,
+
 	/* --- tag --- */
 
 	`.tag {
 		display : block;
-		margin-left : -0.2em !important;
-		padding-left : 0.24em;
 
 		width : -moz-fit-content;
 		width : -webkit-fit-content;
@@ -896,13 +1287,11 @@ let global_style_rules = () => [
 		overflow-x : hidden;
 		text-overflow : ellipsis;
 
-		border-left-style : solid;
 		border-radius : 7px;
 	}`,
 
 	`.tag, .tag * {
 		border-color : white;
-		border-width : 2px;
 	}`,
 
 	`.tag.tag-config-is-open {
@@ -945,6 +1334,10 @@ let global_style_rules = () => [
 
 	`.tag:hover > .tag-link {
 		background-color : var(--c-ctrl-bg);
+	}`,
+
+	`.tag-type-unknown > a {
+		color : var(--c-tag-unknown);
 	}`,
 
 	`.tag-count {
@@ -998,15 +1391,15 @@ let global_style_rules = () => [
 		height : 14px;
 	}`,
 
-	`.tagset:not(.tags-edited):not(:hover) .tag-btn[state="off"],
-		.tagset:not(.tags-edited):not(:hover) .tag-btn[type="edit"] {
+	`.tagset:not(:hover) .tag-btn[state="off"]:not([type="edit"]),
+		.tagset:not(.tags-proposed):not(:hover) .tag-btn[type="edit"] {
 		opacity : 0.1;
 		background-image : url("${IconTbl.BlackDot8}");
 	}`,
 
 	`.tagset:not(:hover) .tag-btn[state="off"] > *,
 		.tagset:not(.tags-editable) .tag-btn[type="edit"],
-		.tagset:not(.tags-edited):not(:hover) .tag-btn[type="edit"] > *,
+		.tagset:not(.tags-proposed):not(:hover) .tag-btn[type="edit"] > *,
 		.tagset:not(.tags-extractrls) .tag-btn:not([type="edit"]) {
 		display : none;
 	}`,
@@ -1111,6 +1504,124 @@ let global_style_rules = () => [
 		font-weight : bold;
 	}`,
 ];
+
+let DefaultFavtagTbl = {
+	Meta : [
+		`tagme`,
+		`hi_res`,
+		`3d`,
+		`real`,
+		`text`,
+		`english_text`,
+		`japanese_text`,
+		`censored`,
+		`animated`,
+		`high_framerate`,
+		`artist_request`,
+		`character_request`,
+		`copyright_request`,
+		`translation_request`,
+	],
+
+	Species : [
+		`mammal`,
+		`furry`,
+		`scalie`,
+		`anthro`,
+
+		`human`,
+		`canine`,
+		`bovine`,
+		`dragon`,
+		`feline`,
+		`avian`,
+		`rodent`,
+		`equine`,
+		`marine`,
+		`reptile`,
+
+		`fox`,
+		`wolf`,
+		`cat`,
+		`dog`,
+		`frog`,
+		`cow`,
+		`octopus`,
+		`fish`,
+		`mouse`,
+		`rat`,
+		`horse`,
+	],
+
+	Gender : [
+		`female`,
+		`male`,
+		`futanari`,
+		`dickgirl`,
+	],
+
+	Features : [
+		`breasts`,
+		`areolae`,
+		`nipples`,
+		`erect_nipples`,
+		`inverted nipples`,
+		`flat_chest`,
+		`small_breasts`,
+		`medium_breasts`,
+		`large_breasts`,
+		`huge_breasts`,
+		`hyper_breasts`,
+
+		`hair`,
+		`long_hair`,
+		`twintails`,
+		`pony_tail`,
+
+		`pussy`,
+		`clitoris`,
+		`penis`,
+		`tail`,
+		`tongue`,
+		`navel`,
+		`horn`,
+		`wings`,
+		`tentacle`,
+
+		`chubby`,
+		`smile`,
+		`open_mouth`,
+		`tongue_out`,
+		`pregnant`,
+		`blush`,
+		`lactation`,
+		`tears`,
+		`saliva`,
+		`sweat`,
+	],
+
+	Attire : [
+		`nude`,
+		`topless`,
+		`bikini`,
+		`underwear`,
+		`hat`,
+		`boots`,
+		`piercing`,
+		`collar`,
+		`panties`,
+	],
+
+	Situation : [
+		`sitting`,
+		`lying`,
+		`kneeling`,
+		`bondage`,
+		`unbirthing`,
+		`vore`,
+		`solo`,
+	],
+};
 
 /* icons (CC BY 3.0) from http://p.yusukekamiyamane.com/ */
 let IconTbl = {
