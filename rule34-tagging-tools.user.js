@@ -2,7 +2,7 @@
 // @name        Rule34.xxx: Tagging Tools
 // @id          rthirtyftaggingtools
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-01-17
+// @version     2017-01-19
 // @include     *rule34.xxx/*
 // @domain      rule34.xxx
 // @run-at      document-end
@@ -210,9 +210,7 @@ class SearchBarCtrlrº {
 		let Tbl = new Map();
 
 		for (let X of QueryParts) {
-			if (X.includes(`:`) || X.includes(`*`) || X.includes(`~`)) {
-				Tbl.set(X, `unknown`);
-			} else if (X.startsWith(`-`) && X.length >= 2) {
+			if (X.startsWith(`-`) && X.length >= 2) {
 				Tbl.set(X.slice(1), `exclude`);
 			} else {
 				Tbl.set(X, `include`);
@@ -408,7 +406,7 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 
 		this._q(`footer`).insertAdjacentHTML(`beforeend`, `
 			<div class="tags-add-form">
-				<figure class="tags-add-btn" title="Add tag"></figure>
+				<figure class="tags-add-btn" title="Add tag(s)"></figure>
 				<div>
 					<textarea class="tags-add-field"
 						rows="1" autocomplete="off"></textarea>
@@ -424,8 +422,12 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 		this._q(`apply`).addEventListener(`DOMActivate`, () =>
 			this.apply_tag_proposals());
 
-		this._q(`discard`).addEventListener(`DOMActivate`, () =>
-			this.discard_tag_proposals());
+		this._q(`discard`).addEventListener(`DOMActivate`, () => (
+			this.discard_tag_proposals(),
+			this.Status = {
+				Disp : `none`,
+				Msg : `Changes discarded`,
+			}));
 
 		this._q(`refresh`).addEventListener(`mousedown`, (Ev) => {
 			if (Ev.button !== 0) {return;};
@@ -439,13 +441,18 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 			window.dispatchEvent(new CustomEvent(`:pref-update`, {}));
 		});
 
+		this._q(`add-btn`).addEventListener(`click`, (Ev) => {
+			if (Ev.button !== 0) {return;};
+			this.on_tag_add_form_submit();
+		});
+
 		this._q(`add-field`).addEventListener(`keydown`, (Ev) => {
 			if (Ev.key === `Enter`) {
 				if (Ev.altKey || Ev.ctrlKey || Ev.metaKey || Ev.shiftKey) {
 					return;};
 				this.on_tag_add_form_submit();
 			};
-		});
+		})
 
 		this._q(`add-field`).addEventListener(`input`, ({
 			currentTarget : X,
@@ -715,9 +722,12 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 	};
 
 	on_tag_add_form_submit() {
-		letif(this._q(`add-field`).value.match(/[^\s]+/g), Words => {
+		let Field = this._q(`add-field`);
+		letif(Field.value.match(/[^\s]+/g), Words => {
 			[for (X of Words) this.assoc({Name : X})];
-			this._q(`add-field`).value = ``;
+			Field.value = ``;
+			Field.focus();
+			Field.scrollIntoView(false);
 		});
 	};
 };
@@ -1185,7 +1195,7 @@ let global_style_rules = () => [
 	}`,
 
 	`.tags-status:hover {
-		position : fixed;
+		position : relative; /* move to top of z-order */
 		overflow : visible;
 		background-color : rgba(255, 255, 255, 0.75);
 	}`,
@@ -1556,11 +1566,19 @@ let DefaultFavtagTbl = {
 	Gender : [
 		`female`,
 		`male`,
-		`futanari`,
-		`dickgirl`,
+		`futanari`, /* both genitalia */
+		`dickgirl`, /* female body, male genitalia */
+		`cuntboy`, /* male body, female genitalia */
 	],
 
 	Features : [
+		`%colour%_skin`,
+		`dark_skin`,
+		`pale_skin`,
+		`shiny_skin`,
+		`skindentation`,
+		`deep_skin`,
+
 		`breasts`,
 		`areolae`,
 		`nipples`,
@@ -1573,10 +1591,27 @@ let DefaultFavtagTbl = {
 		`huge_breasts`,
 		`hyper_breasts`,
 
-		`hair`,
+		`muscles`,
+		`abs`,
+
+		`%colour%_hair`,
 		`long_hair`,
+		`short_hair`,
 		`twintails`,
 		`pony_tail`,
+		`bald`,
+
+		`%colour%_eyes`,
+		`heterochromia`,
+		`eyes_closed`,
+		`half-closed_eyes`,
+		`eyeshadow`,
+		`glowing_eyes`,
+		`hair_over_one_eye`,
+		`empty_eyes`,
+		`no_pupils`,
+		`bedroom_eyes`,
+		// what's the tag for glazed eyes?
 
 		`pussy`,
 		`clitoris`,
@@ -1587,6 +1622,7 @@ let DefaultFavtagTbl = {
 		`horn`,
 		`wings`,
 		`tentacle`,
+		`foreskin`,
 
 		`chubby`,
 		`smile`,
