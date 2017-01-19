@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        1.11
+// @version        2017-01-19
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
 // @run-at         document-start
@@ -59,17 +59,37 @@ let adjust_searchbar = () => {
 let StyleColourTbl = {// TODO
 	BgMain : `#303a30`,
 	BgAlt : `rgb(41, 49, 41)`,
+	TextMain : `#c0c0c0`,
+	Link : `#b0e0b0`,
+	LinkArtist : `#f0a0a0`,
+	LinkCopyright : `#f0a0f0`,
+	LinkCharacter : `#f0f0a0`,
 };
 
 let GlobalStyleRules = [
-	`* {color : #c0c0c0 !important;}`,
-	`a:link, a:visited {color : #b0e0b0 !important;}`,
-	`.tag-type-copyright > a {color : #f0a0f0 !important;}`,
-	`.tag-type-artist > a {color : #f0a0a0 !important;}`,
-	`.tag-type-character > a {color : #f0f0a0 !important;}`,
-	`*[class*="tag-type-"]:hover {
-		background-color : rgb(80, 90, 80);
-		text-shadow : 0px 0px 2px black;
+	`* {color : ${StyleColourTbl.TextMain};}`,
+	`a:link, a:visited {color : ${StyleColourTbl.Link} !important;}`,
+
+	`.tag-type-copyright > a {
+		color : ${StyleColourTbl.LinkCopyright} !important;
+	}`,
+	`.tag-type-artist > a {
+		color : ${StyleColourTbl.LinkArtist} !important;
+	}`,
+	`.tag-type-character > a {
+		color : ${StyleColourTbl.LinkCharacter} !important;
+	}`,
+	`li[class*="tag-type-"]:hover a {
+		text-shadow :
+			1px 1px 1px black,
+			-1px -1px 1px black,
+			1px -1px 1px black,
+			-1px 1px 1px black;
+	}`,
+
+	`#tag-sidebar > li > span:not([class]) {/* tag count */
+		color : ${StyleColourTbl.TextMain} !important;
+		opacity : 0.4;
 	}`,
 
 	`body {
@@ -139,17 +159,53 @@ let GlobalStyleRules = [
 		border-color : #505a50 !important;
 		text-align : center;
 	}`,
-	`input[type=submit]:active, input[type=button]:active, button:active {
+	`input[type=submit][disabled],
+		input[type=button][disabled],
+		button[disabled]
+	{
+		filter : saturate(0%) brightness(70%);
+	}`,
+	`input[type=submit]:not([disabled]):active,
+		input[type=button]:not([disabled]):active,
+		button:not([disabled]):active
+	{
 		filter : invert(100%) hue-rotate(180deg);
 	}`,
 
 	`#blacklisted-sidebar {display : none !important;}`,
 
-	//`#tag-sidebar img {padding : 10px 0px;}`,
 	`#taglinks-container {margin-top : 10px;}`,
 	`img[src="//rule34.xxx/images/r34chibi.png"] {
 		opacity : 0.5;
-	}`
+	}`,
+
+	`.tags-status:hover {
+		background-color : rgba(0, 0, 0, 0.12) !important;
+	}`,
+
+	`.tag-type-options input + * {
+		text-shadow :
+			1px 1px 1px black,
+			-1px -1px 1px black,
+			1px -1px 1px black,
+			-1px 1px 1px black !important;
+	}`,
+
+	`.tag-type-options input[value="general"] + * {
+		color : ${StyleColourTbl.Link} !important;
+	}`,
+
+	`.tag-type-options input[value="artist"] + * {
+		color : ${StyleColourTbl.LinkArtist} !important;
+	}`,
+
+	`.tag-type-options input[value="character"] + * {
+		color : ${StyleColourTbl.LinkCharacter} !important;
+	}`,
+
+	`.tag-type-options input[value="copyright"] + * {
+		color : ${StyleColourTbl.LinkCopyright} !important;
+	}`,
 ];
 
 let adjust_image_page = function() {
@@ -196,32 +252,32 @@ let adjust_image_page = function() {
 		`.left-box {width : 135px; left : -135px;}`,
 
 		`.right-box {
-			width : 250px;
-			right : -280px;
+			width : 280px;
+			right : -310px;
 			padding : 7px 10px 7px 20px;
 		}`,
 
 		`#note-container {position : absolute;}`,
-		"#note-container > .note-body {"+
-			"position : absolute;"+
-			"padding : 5px;"+
-			"border : 1px solid black;"+
-			"max-width : 300px;"+
-			"min-height : 10px;"+
-			"min-width : 140px;"+
-			"overflow : auto;"+
-			"cursor : pointer;"+
-			"background-color : rgba(0, 0, 0, 0.7);"+
-		"}",
+		`#note-container > .note-body {
+			position : absolute;
+			padding : 5px;
+			border : 1px solid black;
+			max-width : 300px;
+			min-height : 10px;
+			min-width : 140px;
+			overflow : auto;
+			cursor : pointer;
+			background-color : rgba(0, 0, 0, 0.7);
+		}`,
 		`#note-container > .note-body > p.tn {color: gray; font-size: 0.8em;}`,
-		"#note-container > .note-box {"+
-			"position : absolute;"+
-			"height : 150px;"+
-			"width : 150px;"+
-			"background-color : #FFF;"+
-			"border : 1px solid black;"+
-			"cursor : move;"+
-		"}",
+		`#note-container > .note-box {
+			position : absolute;
+			height : 150px;
+			width : 150px;
+			background-color : #FFF;
+			border : 1px solid black;
+			cursor : move;
+		}`,
 		`#note-container > .note-box > .note-corner {
 			position : absolute;
 			height : 7px;
@@ -389,7 +445,8 @@ let adjust_image_page = function() {
 		document.addEventListener(`:toggle-autosize`, () => {
 			let En = is_autosize_enabled();
 			let Link = ToggleSizeBtn.firstElementChild;
-			Link.textContent = En ? `View original size` : `Shrink to window size`;
+			Link.textContent =
+				En ? `View original size` : `Shrink to window size`;
 			Link.style.cursor = En ? `zoom-in` : `zoom-out`;
 		});
 		document.dispatchEvent(new Event(`:toggle-autosize`));
@@ -481,11 +538,34 @@ let adjust_image_page = function() {
 		E.classList.add(`fit-viewport`);
 	};
 
+	{/* correct note positioning */
+		let Script = document.createElement(`script`);
+		Script.appendChild(document.createTextNode(`(function() {
+			"use strict";
+			if (Note === undefined) {return;};
+			let adjust_all = function() {
+				let Idx = 0; let Arr = Note.all; let Len = Arr.length;
+				for (; Idx < Len; Idx += 1) {Arr[Idx].adjustScale();};
+			};
+			window.addEventListener("resize", adjust_all, false);
+			document.addEventListener(":main-image-adjusted", adjust_all, false);
+			document.addEventListener(":toggle-autosize", adjust_all, false);
+			adjust_all();
+		})()`));
+
+		document.addEventListener(`:main-image-loaded`, function f() {
+			document.removeEventListener(`:main-image-loaded`, f);
+			document.body.appendChild(Script);
+		}, false);
+	};
+
 	{/* image load checking */
-		let check_img = () =>
+		let check_img = () => {
 			document.querySelector(`.image-container`)
 				.classList[is_image_complete(Img) ? `add` : `remove`](
 					`image-loaded`);
+			document.dispatchEvent(new CustomEvent(`:main-image-loaded`, {}));
+		};
 		Img.addEventListener(`load`, check_img);
 		Img.addEventListener(`loadedmetadata`, check_img);
 		Img.addEventListener(`loadeddata`, check_img);
@@ -508,12 +588,13 @@ let adjust_image_page = function() {
 			let V = Math.min(Math.pow((WinH - ImgH)/60, 2), WinH/2 - ImgH/2);
 			Img.setAttribute(`style`, `margin-top : `+Math.floor(V)+`px;`);
 			NoteBox.setAttribute(`style`, `margin-top : `+Math.floor(V)+`px;`);
+			document.dispatchEvent(new CustomEvent(`:main-image-adjusted`, {}));
 		};
 		window.addEventListener(`resize`, adjust_margin, false);
 		adjust_margin();
 	};
 
-	{/* overlay edit controls */
+	if (true) {/* overlay edit controls */
 		let E = document.getElementById(`edit_form`);
 		E.classList.add(`edit-overlay`);
 		E.parentNode.insertBefore(E, E.parentNode.firstChild);
@@ -549,7 +630,7 @@ let adjust_image_page = function() {
 		});
 	};
 
-	{/* tag editor button */
+	if (false) {/* tag editor button */
 		let E = document.getElementById(`taglinks-container`);
 		let Btn = document.createElement(`button`);
 		Btn.setAttribute(`form`, ` `);
@@ -571,7 +652,7 @@ let adjust_image_page = function() {
 	/* ad space */
 	document.getElementById(`bottom`).remove();
 
-	{/* tag configuration links */
+	if (false) {/* tag configuration links */
 		let TagList = document.getElementById(`tag-sidebar`);
 		for (let TagEl of [...TagList.children]) {
 			let Name = TagEl.firstChild.textContent.replace(/ /g, `_`);
@@ -599,30 +680,6 @@ let adjust_image_page = function() {
 			TagEl.appendChild(Link);
 		};
 	};
-
-	{/* correct note positioning */
-		let Txt = document.createTextNode(`(function() {
-			"use strict";
-			if (Note === undefined) {return;};
-			let adjust_all = function() {
-				let Idx = 0; let Arr = Note.all; let Len = Arr.length;
-				for (; Idx < Len; Idx += 1) {Arr[Idx].adjustScale();};
-			};
-			window.addEventListener("resize", adjust_all, false);
-			adjust_all();
-		})()`);
-		let Script = document.createElement(`script`);
-		Script.setAttribute(`type`, `application/javascript;version=1.8`);
-		Script.appendChild(Txt);
-		if (Img.complete) {
-			document.body.appendChild(Script);
-		} else {
-			Img.addEventListener(`load`, function f() {
-				Img.removeEventListener(`load`, f);
-				document.body.appendChild(Script);
-			}, false);
-		};
-	};
 };
 
 let adjust_gallery_page = function() {
@@ -632,7 +689,7 @@ let adjust_gallery_page = function() {
 		`#post-list > * {float : none !important;}`,
 		`.sidebar {
 			width : auto !important;
-			max-width : 19em !important;
+			max-width : 23em !important;
 			margin-right : auto !important;
 			padding : 7px 10px 7px 20px;
 			flex-shrink : 0;
@@ -728,7 +785,8 @@ let adjust_gallery_page = function() {
 		`;
 
 		Thumbs[0].parentNode.insertBefore(ContentBox, Thumbs[0]);
-		let ThumbContainer = document.querySelector(`#post-list .image-container`);
+		let ThumbContainer = document.querySelector(
+			`#post-list .image-container`);
 		for (let X of Thumbs) {
 			X.querySelector(`img`).classList.add(`preview`);
 			ThumbContainer.appendChild(X);
@@ -774,8 +832,8 @@ let adjust_gallery_page = function() {
 		let E = document.querySelector(`#tag-sidebar`);
 		if (E) {
 			E.parentNode.setAttribute(`id`, `taglinks-container`);
-			E.parentNode.querySelector(`h5`)
-				.setAttribute(`style`, `display : none;`);
+			//E.parentNode.querySelector(`h5`)
+			//	.setAttribute(`style`, `display : none;`);
 		};
 	};
 
@@ -791,14 +849,14 @@ let adjust_gallery_page = function() {
 /* --- --- */
 
 let on_document_head_loaded = function() {
-	if (document.location.pathname === `/`) {
-		document.location.pathname = `/index.php?page=post&s=list`
+	if (location.pathname === `/`) {
+		location.pathname = `/index.php?page=post&s=list`
 		return;
 	};
 
 	if (RegExp(
 		`/(index.php|chat.php|icameout.php|(stats(/[^?]*)?))?(\\?.*)?$`
-	).test(document.location.pathname+document.location.search)) {
+	).test(location.pathname+location.search)) {
 		insert_style_rules(GlobalStyleRules);
 	};
 };
@@ -807,9 +865,9 @@ let on_document_head_loaded = function() {
 document.addEventListener(`DOMContentLoaded`, function callee() {
 	if (!document.body) {return;};
 	/* only apply to …/index.php?page=post… */
-	if (document.location.pathname !== `/index.php`) {return;};
+	if (location.pathname !== `/index.php`) {return;};
 	let QueryTbl = {};
-	document.location.search.substring(1).split(`&`).forEach(function(Txt) {
+	location.search.substring(1).split(`&`).forEach(function(Txt) {
 		let Arr = Txt.split(`=`);
 		QueryTbl[Arr[0]] = Arr[1];
 	});
