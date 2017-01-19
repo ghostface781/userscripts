@@ -14,6 +14,12 @@
 `use strict`;
 
 /*
+persistent values:
+	`tagset-show-extra-controls` (bool) - ?
+	`recent-tags` (JSON array of strings) - sorted [oldest, …, newest]
+*/
+
+/*
 	TODO
 		test parallel requests
 		tag 'stock' popup
@@ -29,7 +35,7 @@ let entrypoint = () => {
 	if (Q.get(`page`) === `favourites` ||
 		(Q.get(`page`) === `post` && [`list`, `view`].includes(Q.get(`s`)))
 	) {
-		// greasemonkey bug?
+		// greasemonkey bug? (script runs at document-start as well)
 		if (!document.getElementById(`tag-sidebar`)) {return;};
 
 		insert_style_rules(global_style_rules());
@@ -412,6 +418,7 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 						rows="1" autocomplete="off"></textarea>
 					<ul class="tags-add-footer">
 						<li><kbd>tab</kbd> autocomplete</li>
+						<li><kbd>esc</kbd> defocus</li>
 					</ul>
 				</div>
 			</div>
@@ -450,7 +457,16 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 			if (Ev.key === `Enter`) {
 				if (Ev.altKey || Ev.ctrlKey || Ev.metaKey || Ev.shiftKey) {
 					return;};
+				Ev.preventDefault();
 				this.on_tag_add_form_submit();
+
+			} else if (Ev.key === `Tab`) {
+				Ev.preventDefault();
+				// autocomplete
+
+			} else if (Ev.key === `Escape`) {
+				Ev.preventDefault();
+				// close autocomplete
 			};
 		})
 
@@ -668,21 +684,9 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 	};
 
 	refresh() {
-		enforce(Number.isSafeInteger(this.ImageMetaTbl.Id));
-
-		this.http_request({
-			Addr : `/index.php?page=post&s=view&id=${this.ImageMetaTbl.Id}`,
-			Method : `get`,
-		}).then((Resp) =>
-			Resp.blob()
-		).then((B) =>
-			blob_to_doc(B)
-		).then((Doc) =>
-			Promise.resolve(
-				PageCtrlr.parse_tag_list(enforce(
-					Doc.getElementById(`tag-sidebar`))))
-
-		).then((Descrs) => {
+		this.fetch_tagdescrs_for(
+			this.ImageMetaTbl.Id
+		).then(Descrs => {
 			/* replace the whole tag set */
 			[for (X of this.Tags)
 				X.remove()];
@@ -709,6 +713,24 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 				Msg : `Internal error`,
 			};
 			throw Xcep;
+		});
+	};
+
+	fetch_tagdescrs_for(Id) {
+		enforce(Number.isSafeInteger(Id));
+		return new Promise((resolve, reject) => {
+			this.http_request({
+				Addr : `/index.php?page=post&s=view&id=${Id}`,
+				Method : `get`,
+			}).then(Resp =>
+				Resp.blob()
+			).then(B =>
+				blob_to_doc(B)
+			).then(Doc =>
+				resolve(
+					PageCtrlr.parse_tag_list(enforce(
+						Doc.getElementById(`tag-sidebar`))))
+			);
 		});
 	};
 
@@ -1610,7 +1632,6 @@ let DefaultFavtagTbl = {
 		`hair_over_one_eye`,
 		`empty_eyes`,
 		`no_pupils`,
-		`bedroom_eyes`,
 		// what's the tag for glazed eyes?
 
 		`pussy`,
