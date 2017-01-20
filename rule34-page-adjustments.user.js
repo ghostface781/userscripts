@@ -1,9 +1,10 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        2017-01-19
+// @version        2017-01-20
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
+// @downloadURL    https://0.0.0.0/
 // @run-at         document-start
 // @grant          none
 // ==/UserScript==
@@ -205,6 +206,14 @@ let GlobalStyleRules = [
 
 	`.tag-type-options input[value="copyright"] + * {
 		color : ${StyleColourTbl.LinkCopyright} !important;
+	}`,
+
+	`.tag.tag-added {
+		background-image : var(--u-Checkerboard2px00ff0064);
+	}`,
+
+	`.tag.tag-deleted {
+		background-image : var(--u-Checkerboard2pxff000080);
 	}`,
 ];
 
@@ -553,18 +562,21 @@ let adjust_image_page = function() {
 			adjust_all();
 		})()`));
 
+		document.getElementById(`note-container`).style.display = `none`;
 		document.addEventListener(`:main-image-loaded`, function f() {
 			document.removeEventListener(`:main-image-loaded`, f);
+			document.getElementById(`note-container`).style.display = ``;
 			document.body.appendChild(Script);
 		}, false);
 	};
 
 	{/* image load checking */
 		let check_img = () => {
+			let X = is_image_complete(Img);
 			document.querySelector(`.image-container`)
-				.classList[is_image_complete(Img) ? `add` : `remove`](
-					`image-loaded`);
-			document.dispatchEvent(new CustomEvent(`:main-image-loaded`, {}));
+				.classList.toggle(`image-loaded`, X);
+			if (X) {document.dispatchEvent(
+				new CustomEvent(`:main-image-loaded`, {}));};
 		};
 		Img.addEventListener(`load`, check_img);
 		Img.addEventListener(`loadedmetadata`, check_img);
