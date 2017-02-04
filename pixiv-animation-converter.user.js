@@ -4,7 +4,7 @@
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @include     *pixiv.net/member_illust.php?*
 // @domain      www.pixiv.net
-// @version     2016-01-05
+// @version     2017-02-01
 // @run-at      document-end
 // @grant       none
 // ==/UserScript==
@@ -31,9 +31,10 @@ default maximum is too low.
 
 `use strict`;
 
-let enforce = console.assert;/*(X) => {
+let enforce = (X) => {
+	console.assert(X);
 	if (!X) {throw new Error(`enforce failed`)};
-};*/
+};
 
 /* NOTE: DataView must be used for reading/writing PNG integers, because they
 	are stored as big-endian! */
@@ -249,10 +250,9 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 		chunkSize : 300000,
 		autoStart : false,
 		autosize : false
-    });
+	});
 
 	let Canv = document.createElement(`canvas`);
-	[Canv.width, Canv.height] = Meta.size;
 	let Ctx = Canv.getContext(`2d`);
 
 	let Pngs = new Array(Meta.frames.length);
@@ -274,6 +274,9 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 		if (Zip.getLoadedFrames() !== Meta.frames.length) {return;};
 
 		for (let Idx = 0; Idx < Meta.frames.length; ++Idx) {
+			let Img = Zip._frameImages[Idx];
+			enforce(Img.naturalWidth && Img.naturalHeight);
+			[Canv.width, Canv.height] = [Img.naturalWidth, Img.naturalHeight];
 			Ctx.drawImage(Zip._frameImages[Idx], 0, 0);
 			Canv.toBlob(B => on_blob(Idx, B), `image/png`);
 		};
@@ -285,7 +288,7 @@ let convert = () => new Promise((resolve, reject) => {
 
 	let Meta = pixiv.context.ugokuIllustFullscreenData ||
 		pixiv.context.ugokuIllustData;
-	Meta.size = Meta.size || pixiv.context.illustSize;
+	delete Meta.size; /* size might be incorrect anyway */
 
 	console.log(`retrieving frame images ...`);
 	get_frame_pngs(Meta).then(Pngs => {
