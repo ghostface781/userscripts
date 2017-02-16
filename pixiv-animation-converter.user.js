@@ -4,7 +4,7 @@
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @include     *pixiv.net/member_illust.php?*
 // @domain      www.pixiv.net
-// @version     2017-02-01
+// @version     2017-02-16
 // @run-at      document-end
 // @grant       none
 // ==/UserScript==
@@ -15,7 +15,7 @@ freeze your browser. give it at least two minutes before giving up. */
 
 /*
 PROTIP: convert APNG files to WebM using FFMPEG:
-> ffmpeg -max_fps 60 -i source.png -c:v libvpx-vp9 -r 60 -lossless 1 output.webm
+> ffmpeg -max_fps 60 -i source.png -vsync cfr -r 60 -lossless 1 output.webm
 
 the "-r 60" flag sets the output frame rate; feel free to lower it.
 
@@ -25,6 +25,11 @@ more info: https://trac.ffmpeg.org/wiki/Encode/VP9
 
 the "-max_fps 60" flag affects the input decoder, is very important because the
 default maximum is too low.
+
+if FPS problems still occur, try prepending "-default_fps 60" as well.
+
+if you don't specify "-vsync cfr", ffmpeg sometimes doesn't use the correct
+delay on the last frame. I believe this is a bug.
 */
 
 /* -------------------------------------------------------------------------- */
@@ -319,7 +324,14 @@ let create_convert_button = () => {
 	let IsProcessing = false;
 
 	let open_blob = () => {
-		location.href = URL.createObjectURL(ApngBlob);
+		let Id = (new URLSearchParams(location.search)).get(`illust_id`);
+		let X = document.createElement(`a`);
+		X.href = URL.createObjectURL(ApngBlob);
+		X.download = `illust-${Id}-${pixiv.title.original || ""}.apng`;
+		X.dispatchEvent(new MouseEvent("click"));
+
+		// alternate method:
+		// location.href = URL.createObjectURL(ApngBlob);
 	};
 
 	let Btn = document.createElement(`div`);
@@ -344,7 +356,7 @@ let create_convert_button = () => {
 		IsProcessing = true;
 		Btn.update();
 		convert().then((ApngBytes) => {
-			ApngBlob = new Blob([ApngBytes], {type : `image/apng`});
+			ApngBlob = new Blob([ApngBytes], {type : `image/png`});
 			IsProcessing = false;
 			Btn.update();
 			open_blob();
