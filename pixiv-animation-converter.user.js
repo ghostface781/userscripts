@@ -4,7 +4,7 @@
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @include     *pixiv.net/member_illust.php?*
 // @domain      www.pixiv.net
-// @version     2017-02-16
+// @version     2017-03-21
 // @run-at      document-end
 // @grant       none
 // ==/UserScript==
@@ -70,6 +70,21 @@ let SpinnerUri = `data:image/gif;base64,
 	m5FUUXSTICy2jeu63q0D3PlwCx0lEMgYDBgmk/J8LqWLw2FRhV6z2q0VF94iJ9pOBAAh+QQBCgAL
 	ACwAAAAAEAAQAAAESHDJuQihmFqbZynVtiAI9n3hSJbeSa1sm5FUEHTTMCy2jeu63q0D3PlwCx3l
 	cMgIBBgmk/J8LqULg2FRhV6z2q0VF94iJ9pOBAA7`;
+
+let bloburl_to_blobobj = (Url) => new Promise((resolve, reject) => {
+	enforce(typeof Url === `string`);
+
+	let X = new XMLHttpRequest();
+
+	X.addEventListener(`loadend`, () => {
+		if (X.readyState !== 4 || X.status !== 200) {return reject();};
+		resolve(X.response);
+	});
+
+	X.open(`GET`, Url, true);
+	X.responseType = `blob`;
+	X.send();
+});
 
 /* --- crc stuff --- */
 
@@ -248,6 +263,7 @@ let pack_png = (Chunks) => {
 let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 	/* resolves to an array of PNG buffers */
 
+	/* https://github.com/pixiv/zip_player/blob/master/zip_player.js */
 	let Zip = new ZipImagePlayer({
 		canvas : document.createElement(`canvas`),
 		source : Meta.src,
@@ -257,18 +273,17 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 		autosize : false
 	});
 
-	let Canv = document.createElement(`canvas`);
-	let Ctx = Canv.getContext(`2d`);
-
-	let Pngs = new Array(Meta.frames.length);
+	let Pngs = Array(Meta.frames.length);
 	let DoneCount = 0;
+
 	let on_png = (Idx, P) => {
 		Pngs[Idx] = P;
 		++DoneCount;
-		if (DoneCount === Meta.frames.length) {
+		if (DoneCount === Pngs.length) {
 			resolve(Pngs);
 		};
 	};
+
 	let on_blob = (Idx, B) => {
 		let R = new FileReader();
 		R.addEventListener(`loadend`, () => on_png(Idx, R.result));
@@ -276,14 +291,16 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 	};
 
 	jQuery(Zip).on(`loadingStateChanged`, () => {
-		if (Zip.getLoadedFrames() !== Meta.frames.length) {return;};
+		if (Zip.getLoadedFrames() !== Pngs.length) {return;};
 
-		for (let Idx = 0; Idx < Meta.frames.length; ++Idx) {
+		for (let Idx = 0; Idx < Pngs.length; ++Idx) {
 			let Img = Zip._frameImages[Idx];
-			enforce(Img.naturalWidth && Img.naturalHeight);
-			[Canv.width, Canv.height] = [Img.naturalWidth, Img.naturalHeight];
-			Ctx.drawImage(Zip._frameImages[Idx], 0, 0);
-			Canv.toBlob(B => on_blob(Idx, B), `image/png`);
+			let C = document.createElement(`canvas`);
+			[C.width, C.height] = [Img.naturalWidth, Img.naturalHeight];
+			C.getContext(`2d`).drawImage(Img, 0, 0);
+			C.toBlob(B => on_blob(Idx, B), `image/png`);
+			/* can't reuse a canvas for multiple frames because toBlob is
+			asynchronous */
 		};
 	});
 });
