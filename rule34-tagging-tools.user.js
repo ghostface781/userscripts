@@ -2,9 +2,10 @@
 // @name        Rule34.xxx: Tagging Tools
 // @id          rthirtyftaggingtools
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-01-19
+// @version     2017-01-25
 // @include     *rule34.xxx/*
 // @domain      rule34.xxx
+// @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-tagging-tools.user.js
 // @run-at      document-end
 // @grant       GM_getValue
 // @grant       GM_setValue
@@ -15,6 +16,7 @@
 
 /*
 persistent values:
+	`verify-changes` (bool) - ?
 	`tagset-show-extra-controls` (bool) - ?
 	`recent-tags` (JSON array of strings) - sorted [oldest, …, newest]
 */
@@ -24,8 +26,11 @@ persistent values:
 		test parallel requests
 		tag 'stock' popup
 
-		what happens if you set a type for a tag which doesn't exist yet?
-			should do another request to check the type again
+		applying tag type resets its proposal state
+
+		tag-type form should not need confirmation to apply
+
+		artist:tag character:tag etc.
 */
 
 /* -------------------------------------------------------------------------- */
@@ -282,7 +287,17 @@ class TagSetCtrlrº {
 		;
 	};
 
-	get Tags() {return this.TagTbl.values(); /* iterator, not random access */};
+	get Tags() {
+		return this.TagTbl.values(); /* iterator, not random access */
+		/* !!! does not necessarily iterate in order !!! */
+	};
+
+	get InOrderTags() {
+		return (for (X of this.El.children) /* iterator, not random access */
+			if (X.tagName === `LI`)
+			X);
+		/* !!! iterates over the live collection of elements !!! */
+	};
 
 	assoc(Descr) {
 		enforce(Descr.Name);
@@ -294,7 +309,7 @@ class TagSetCtrlrº {
 		};
 
 		/* maintain sorted order */
-		for (let Tag of this.Tags) {
+		for (let Tag of this.InOrderTags) {
 			let Rel = Descr.Name.localeCompare(Tag.Ctrlr.TagDescr.Name);
 
 			if (Rel === 0) {/* replace tag */
@@ -311,11 +326,11 @@ class TagSetCtrlrº {
 		this._q(`footer`).insertAdjacentElement(`beforebegin`, create_tag());
 	};
 
-	apply_tag_type(Name, Type) {
+	apply_tag_type(Name, NewType) {
 		let X = new URLSearchParams(``);
 		X.set(`commit`, `Save`);
 		X.set(`tag`, Name);
-		X.set(`type`, Type
+		X.set(`type`, NewType
 			.replace(`general`, `tag`));
 
 		this.http_request({
@@ -323,27 +338,74 @@ class TagSetCtrlrº {
 			Method : `post`,
 			Mime : `application/x-www-form-urlencoded`,
 			Body : X,
-		}).then((Resp) => (
-			enforce(Resp.ok),
-			Resp
-		)).then((Resp) => {
-			PageCtrlr.TagDescrCacheTbl
-				.set(Name, Object.assign({},
-					PageCtrlr.TagDescrCacheTbl.get(Name),
-					{Type : Type}));
-			this.assoc({Name : Name, Type : Type,});
+		}).then(Resp =>
+			enforce(Resp.ok)
+		).then(() =>
+			GM_getValue(`verify-changes`, true) ?
+				this.query_tag_descr(Name) /* updates cache */
+			:
+				Promise.resolve(
+					PageCtrlr.TagDescrCacheTbl
+						.set(Name, Object.assign({},
+							PageCtrlr.TagDescrCacheTbl.get(Name),
+							{Type : NewType})))
+		).then(() => {
+			enforce(PageCtrlr.TagDescrCacheTbl.get(Name).Type === NewType);
+		}).then(() => {
+			this.assoc(PageCtrlr.TagDescrCacheTbl.get(Name));
 			this.Status = {
 				Disp : `success`,
-				Msg : `Tag type \u2192 ${Type} ('${Name}')`,
+				Msg : `Tag type \u2192 ${NewType} ('${Name}')`,
 			};
-		}, (Xcep) => {
+		}, Xcep => {
 			this.Status = {
 				Disp : `warn`,
 				Msg : `Error saving tag type for '${Name}'`,
 			};
-			Xcep;
+		}).catch(Xcep => {
+			this.Status = {
+				Disp : `warn`,
+				Msg : `Internal error`,
+			};
+			console.error(Xcep);
+			throw Xcep;
 		});
 	};
+
+	query_tag_descr(TagName) {return new Promise((resolve, reject) => {
+		/* updates cache if successful,
+		but does not update tagset itself */
+		let Params = new URLSearchParams(`page=tags&s=list`);
+		Params.set(`tags`, enforce(TagName));
+
+		this.http_request({
+			Addr : `/index.php?${Params}`,
+			Method : `get`,
+		}).then(Resp => (
+			enforce(Resp.ok),
+			Resp.blob()
+		)).then(B =>
+			blob_to_doc(B)
+		).then(Doc => {
+			let Cells = enforce(Doc.querySelectorAll(
+				`table.highlightable > tbody > tr:not(.tableheader) > td`));
+			enforce(Cells.length === 3);
+			letx((X = Cells[1].textContent.replace(/ /g, `_`).toLowerCase()) =>
+				enforce(X === TagName));
+
+			let Descr = {
+				Name : TagName,
+				Type : enforce(
+					/(\w+)\s+\(edit\)/.exec(Cells[2].textContent)[1]),
+				Count : parseInt(Cells[0].textContent) || 0,
+			};
+			PageCtrlr.TagDescrCacheTbl.set(TagName, Descr);
+			resolve(Descr);
+
+		}).catch(Xcep => (
+			reject(Xcep)
+		));
+	});};
 
 	http_request({Addr, Method, Mime, Body,}) {
 		/* ? */
@@ -448,7 +510,7 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 			window.dispatchEvent(new CustomEvent(`:pref-update`, {}));
 		});
 
-		this._q(`add-btn`).addEventListener(`click`, (Ev) => {
+		this._q(`add-btn`).addEventListener(`mousedown`, (Ev) => {
 			if (Ev.button !== 0) {return;};
 			this.on_tag_add_form_submit();
 		});
@@ -545,12 +607,29 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 		}, true);
 
 		this.El.addEventListener(`:tags-mutated`, () => {
-			this.El.classList.toggle(`tags-proposed`,
-				!!(for (X of this.Tags)
+			let Dirty = !!
+				(for (X of this.Tags)
 					if (X.Ctrlr.TagDescr.Proposal)
 					true
-				).next().value
-			);
+				).next().value;
+
+			this.El.classList.toggle(`tags-proposed`, Dirty);
+
+			if (Dirty) {
+				this.Status = {Disp : `hide`,};};
+
+			/* get descrs for unknown tags */
+			for (let {Ctrlr : {TagDescr : X}} of this.Tags) {
+				if (X.Type === `unknown`) {
+					this.query_tag_descr(X.Name).then(Descr =>
+						letif(this.TagTbl.get(X.Name), ({Ctrlr : Tc}) => {
+							if (Tc.TagDescr.Type === `unknown`) {
+								Tc.update_descr(Descr);
+							};
+						})
+					, () => {});
+				};
+			};
 		});
 
 		this.on_pref_update();
@@ -584,7 +663,7 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 		} else {
 			if (this.RemoteTags && !this.RemoteTags.has(Descr.Name)) {
 				/* mark as proposed add */
-				Descr = Object.assign({}, Descr, {Proposal : `assoc`});
+				Descr.Proposal = `assoc`;
 			};
 			super.assoc(Descr);
 		};
@@ -634,6 +713,11 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 				if (X.Ctrlr.TagDescr.Proposal === `assoc`)
 				X.Ctrlr.TagDescr.Name));
 
+		let RequTagNames = 
+			[for (X of this.Tags)
+				if (X.Ctrlr.TagDescr.Proposal !== `dissoc`)
+				X.Ctrlr.TagDescr.Name];
+
 		let X = new URLSearchParams(``);
 		X.set(`id`, this.ImageMetaTbl.Id);
 		X.set(`submit`, `Save changes`);
@@ -645,21 +729,32 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 		X.set(`next_post`, this.ImageMetaTbl.NextId);
 		X.set(`previous_post`, this.ImageMetaTbl.PrevId);
 		X.set(`source`, this.ImageMetaTbl.Source);
-		X.set(`tags`,
-			[for (X of this.Tags) // bugzilla #980828
-				if (X.Ctrlr.TagDescr.Proposal !== `dissoc`)
-				X.Ctrlr.TagDescr.Name]
-			.join(` `));
+		X.set(`tags`, RequTagNames.join(` `));
 
 		this.http_request({
 			Addr : `/public/edit_post.php`,
 			Method : `post`,
 			Mime : `application/x-www-form-urlencoded`,
 			Body : X,
-		}).then((Resp) => (
+		}).then(Resp => (
 			enforce(Resp.ok || Resp.type === `opaqueredirect`),
-			Resp
-		)).then((Resp) => {
+
+			new Promise((res, rej) => {
+				if (GM_getValue(`verify-changes`, true)) {
+					this.fetch_tagdescrs_for(this.ImageMetaTbl.Id)
+						.then(Descrs => (
+							sets_eq(
+								new Set(RequTagNames),
+								new Set((for (X of Descrs) X.Name))
+							) ? res() : rej()
+						), () =>
+							rej()
+						)
+				} else {
+					res();
+				};
+			})
+		)).then(() => {
 			[for (X of this.Tags)
 				if (X.Ctrlr.TagDescr.Proposal === `dissoc`)
 				this._raw_dissoc(X.Ctrlr.TagDescr.Name)];
@@ -702,12 +797,12 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 					Msg : `No tags found for #${this.ImageMetaTbl.Id}`,}
 			;
 
-		}, (Xcep) => {
+		}, Xcep => {
 			this.Status = {
 				Disp : `warn`,
 				Msg : `Error fetching tags for #${this.ImageMetaTbl.Id}`,
 			};
-		}).catch((Xcep) => {
+		}).catch(Xcep => {
 			this.Status = {
 				Disp : `warn`,
 				Msg : `Internal error`,
@@ -746,7 +841,9 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 	on_tag_add_form_submit() {
 		let Field = this._q(`add-field`);
 		letif(Field.value.match(/[^\s]+/g), Words => {
-			[for (X of Words) this.assoc({Name : X})];
+			for (let X of Words) {
+				this.assoc({Name : X.toLowerCase()});
+			};
 			Field.value = ``;
 			Field.focus();
 			Field.scrollIntoView(false);
@@ -1058,13 +1155,14 @@ let delete_whitenodes = (Root) => {
 let blob_to_doc = (Src) => new Promise((resolve, reject) => {
 	let Url = (Src instanceof Blob) ?
 		URL.createObjectURL(Src)
-	: (typeof Src === `string`)
-		Src;
+	: (
+		enforce(typeof Src === `string`),
+		Src);
 
 	let X = new XMLHttpRequest();
 
 	X.addEventListener(`loadend`, () => {
-		if (X.readyState !== 4 || X.status !== 200) {reject();};
+		if (X.readyState !== 4 || X.status !== 200) {return reject();};
 		resolve(X.response);
 	});
 
@@ -1084,7 +1182,12 @@ let global_style_rules = () => [
 		--c-tag-character : #0a0;
 		--c-tag-copyright : #a0a;
 		--c-tag-unknown : #333;
+
 		--ff-narrow : "tahoma", "trebuchet ms", "arial", sans-serif;
+
+		/* for use by dark styles */
+		--u-Checkerboard2px00ff0064 : url("${ImgTbl.Checkerboard2px00ff0064}");
+		--u-Checkerboard2pxff000080 : url("${ImgTbl.Checkerboard2pxff000080}");
 	}`,
 
 	/* --- tagset --- */
@@ -1164,12 +1267,12 @@ let global_style_rules = () => [
 
 	`.tags-refresh {
 		cursor : pointer;
-		background-image : url("${IconTbl.RefreshArrow}");
+		background-image : url("${ImgTbl.RefreshArrow}");
 		/*filter : hue-rotate(-75deg);*/ /* blue -> green */
 	}`,
 
 	`.tags-spinner {
-		background-image : url("${IconTbl.SpinnerStatic}");
+		background-image : url("${ImgTbl.SpinnerStatic}");
 		animation-name : tags-spinner;
 		animation-iteration-count : infinite;
 		animation-duration : 0.36s;
@@ -1178,7 +1281,7 @@ let global_style_rules = () => [
 
 	`@-moz-document regexp(".*") {
 		.tags-spinner {
-			background-image : url("${IconTbl.Spinner}");
+			background-image : url("${ImgTbl.Spinner}");
 			animation-name : none;
 		}
 	}`,
@@ -1190,7 +1293,7 @@ let global_style_rules = () => [
 
 	`.tags-togglectrls {
 		cursor : pointer;
-		background-image : url("${IconTbl.UiButtons}");
+		background-image : url("${ImgTbl.UiButtons}");
 		filter : brightness(90%);
 	}`,
 
@@ -1231,15 +1334,15 @@ let global_style_rules = () => [
 	}`,
 
 	`.tags-status[disposition="success"] {
-		background-image : url("${IconTbl.Tick}");
+		background-image : url("${ImgTbl.Tick}");
 	}`,
 
 	`.tags-status[disposition="info"] {
-		background-image : url("${IconTbl.Info}");
+		background-image : url("${ImgTbl.Info}");
 	}`,
 
 	`.tags-status[disposition="warn"] {
-		background-image : url("${IconTbl.Warn}");
+		background-image : url("${ImgTbl.Warn}");
 	}`,
 
 	/* --- tagset footer --- */
@@ -1259,7 +1362,7 @@ let global_style_rules = () => [
 		width : 16px;
 		height : 16px;
 		border-radius : 3px;
-		background-image : url("${IconTbl.PlusButton}");
+		background-image : url("${ImgTbl.PlusButton}");
 		background-repeat : no-repeat;
 		background-position : center;
 	}`,
@@ -1334,6 +1437,14 @@ let global_style_rules = () => [
 		border-color : transparent;
 	}`,
 
+	`.tag.tag-added {
+		
+	}`,
+
+	`.tag.tag-deleted {
+		
+	}`,
+
 	`.tag > * {
 		margin-right : 0.3em;
 		vertical-align : middle;
@@ -1347,6 +1458,7 @@ let global_style_rules = () => [
 
 	`.tag-deleted .tag-link {
 		text-decoration-line : line-through;
+		text-decoration-color : rgba(255,0,0,0.5);
 	}`,
 
 	`.tag-added .tag-link::before, .tag-deleted .tag-link::before {
@@ -1424,15 +1536,18 @@ let global_style_rules = () => [
 	}`,
 
 	`.tagset:not(:hover) .tag-btn[state="off"]:not([type="edit"]),
-		.tagset:not(.tags-proposed):not(:hover) .tag-btn[type="edit"] {
+		.tagset:not(.tags-proposed):not(:hover) .tag-btn[type="edit"],
+		.tagset:not(.tags-proposed):not(:hover) .tags-add-btn {
 		opacity : 0.1;
-		background-image : url("${IconTbl.BlackDot8}");
+		background-image : url("${ImgTbl.BlackDot8}");
 	}`,
 
 	`.tagset:not(:hover) .tag-btn[state="off"] > *,
 		.tagset:not(.tags-editable) .tag-btn[type="edit"],
 		.tagset:not(.tags-proposed):not(:hover) .tag-btn[type="edit"] > *,
-		.tagset:not(.tags-extractrls) .tag-btn:not([type="edit"]) {
+		.tagset:not(.tags-extractrls)
+			.tag-btn:not([type="edit"]):not(.tag-config-btn)
+	{
 		display : none;
 	}`,
 
@@ -1446,27 +1561,27 @@ let global_style_rules = () => [
 	}`,
 
 	`.tag-config-btn > * {
-		background-image : url("${IconTbl.Gear}");
+		background-image : url("${ImgTbl.Gear}");
 	}`,
 
 	`.tag-searchin-btn > * {
-		background-image : url("${IconTbl.MagnifierPlus}");
+		background-image : url("${ImgTbl.MagnifierPlus}");
 	}`,
 
 	`.tag-searchex-btn > * {
-		background-image : url("${IconTbl.MagnifierMinus}");
+		background-image : url("${ImgTbl.MagnifierMinus}");
 	}`,
 
 	`.tag-toggle-btn > * {
-		background-image : url("${IconTbl.MinusButton}");
+		background-image : url("${ImgTbl.MinusButton}");
 	}`,
 
 	`.tag-deleted .tag-toggle-btn > * {
-		background-image : url("${IconTbl.PlusButton}");
+		background-image : url("${ImgTbl.PlusButton}");
 	}`,
 
 	`.tag-edit-btn > * {
-		background-image : url("${IconTbl.EditButton}");
+		background-image : url("${ImgTbl.EditButton}");
 	}`,
 
 	/* --- tag config form --- */
@@ -1547,8 +1662,10 @@ let DefaultFavtagTbl = {
 		`english_text`,
 		`japanese_text`,
 		`censored`,
+		`lineart`,
 		`animated`,
 		`high_framerate`,
+		`alpha_channel`,
 		`artist_request`,
 		`character_request`,
 		`copyright_request`,
@@ -1563,6 +1680,7 @@ let DefaultFavtagTbl = {
 
 		`human`,
 		`canine`,
+		`elf`,
 		`bovine`,
 		`dragon`,
 		`feline`,
@@ -1571,6 +1689,7 @@ let DefaultFavtagTbl = {
 		`equine`,
 		`marine`,
 		`reptile`,
+		`primate`,
 
 		`fox`,
 		`wolf`,
@@ -1613,14 +1732,12 @@ let DefaultFavtagTbl = {
 		`huge_breasts`,
 		`hyper_breasts`,
 
-		`muscles`,
-		`abs`,
-
 		`%colour%_hair`,
 		`long_hair`,
 		`short_hair`,
 		`twintails`,
 		`pony_tail`,
+		`side_shave`, /* *hissss* */
 		`bald`,
 
 		`%colour%_eyes`,
@@ -1637,6 +1754,7 @@ let DefaultFavtagTbl = {
 		`pussy`,
 		`clitoris`,
 		`penis`,
+		`balls`,
 		`tail`,
 		`tongue`,
 		`navel`,
@@ -1644,6 +1762,9 @@ let DefaultFavtagTbl = {
 		`wings`,
 		`tentacle`,
 		`foreskin`,
+		`animal_genitalia`,
+		`paws`,
+		`claws`,
 
 		`chubby`,
 		`smile`,
@@ -1655,6 +1776,10 @@ let DefaultFavtagTbl = {
 		`tears`,
 		`saliva`,
 		`sweat`,
+		`erection`,
+		`cum`,
+		`muscles`,
+		`abs`,
 	],
 
 	Attire : [
@@ -1663,25 +1788,45 @@ let DefaultFavtagTbl = {
 		`bikini`,
 		`underwear`,
 		`hat`,
+		`shoes`,
 		`boots`,
 		`piercing`,
 		`collar`,
 		`panties`,
+		`shirt`,
+		`gloves`,
+		`elbow_gloves`,
 	],
 
 	Situation : [
+		`standing`,
 		`sitting`,
 		`lying`,
 		`kneeling`,
 		`bondage`,
 		`unbirthing`,
 		`vore`,
+		`undressing`,
 		`solo`,
+		`looking_at_viewer`,
+	],
+
+	Copyrights : [
+		`pokemon`,
+		`my_little_pony`,
+		`lying`,
+		`kneeling`,
+		`bondage`,
+		`unbirthing`,
+		`vore`,
+		`undressing`,
+		`solo`,
+		`looking_at_viewer`,
 	],
 };
 
 /* icons (CC BY 3.0) from http://p.yusukekamiyamane.com/ */
-let IconTbl = {
+let ImgTbl = {
 	TagEdit : `data:image/png;base64,
 		iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9i
 		ZSBJbWFnZVJlYWR5ccllPAAAAu1JREFUeNqEUW1Ik1EUPu/7brM13drm0GTDyFluA+kL0gK1
@@ -1924,6 +2069,18 @@ let IconTbl = {
 		AABaSURBVDhPY2AYBbhCQAUosR6Iv0MxiA0SIwqAFH4G4v9oGCRGlCEg29A1w/ggOYIA5Gxc
 		BoDkCAKKDdiMxwUgOYJAB08gguSIAiCFINtg0QhiE62ZKBuGkSIAhZEyLVvvDhMAAAAASUVO
 		RK5CYII=
+	`.replace(/\s/g, ""),
+
+	Checkerboard2pxff000080 : `data:image/png;base64,
+		iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAAARnQU1B
+		AACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAZdEVYdFNvZnR3YXJlAHBhaW50Lm5l
+		dCA0LjAuMTM0A1t6AAAAEUlEQVQYV2P4z8DQwAADIA4AHH0C/4Nqy40AAAAASUVORK5CYII=
+	`.replace(/\s/g, ""),
+
+	Checkerboard2px00ff0064 : `data:image/png;base64,
+		iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAAARnQU1B
+		AACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAZdEVYdFNvZnR3YXJlAHBhaW50Lm5l
+		dCA0LjAuMTM0A1t6AAAAEUlEQVQYV2Ng+M+QwgAHQA4AGNsCx/q49+UAAAAASUVORK5CYII=
 	`.replace(/\s/g, ""),
 
 	SpinnerStatic : `data:image/png;base64,
