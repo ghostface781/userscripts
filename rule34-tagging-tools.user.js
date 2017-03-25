@@ -12,7 +12,7 @@
 // @grant       GM_deleteValue
 // ==/UserScript==
 
-`use strict`;
+"use strict";
 
 /*
 persistent values:
