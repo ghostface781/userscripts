@@ -1,10 +1,10 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        2017-01-20
+// @version        2017-04-01
 // @include        *rule34.xxx/*
 // @domain         rule34.xxx
-// @downloadURL    https://0.0.0.0/
+// @downloadURL    https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
 // @run-at         document-start
 // @grant          none
 // ==/UserScript==
@@ -877,16 +877,13 @@ let on_document_head_loaded = function() {
 document.addEventListener(`DOMContentLoaded`, function callee() {
 	if (!document.body) {return;};
 	/* only apply to …/index.php?page=post… */
-	if (location.pathname !== `/index.php`) {return;};
-	let QueryTbl = {};
-	location.search.substring(1).split(`&`).forEach(function(Txt) {
-		let Arr = Txt.split(`=`);
-		QueryTbl[Arr[0]] = Arr[1];
-	});
-	if (QueryTbl[`page`] === `favorites`) {return adjust_gallery_page();};
-	if (QueryTbl[`page`] !== `post`) {return;};
-	if (QueryTbl[`s`] === `view`) {return adjust_image_page();};
-	if (QueryTbl[`s`] === `list`) {return adjust_gallery_page();};
+	if (!/^\/+index.php$/.test(location.pathname)) {return;};
+
+	let Q = new URLSearchParams(location.search);
+	if (Q.get(`page`) === `favorites`) {return adjust_gallery_page();};
+	if (Q.get(`page`) !== `post`) {return;};
+	if (Q.get(`s`) === `view`) {return adjust_image_page();};
+	if (Q.get(`s`) === `list`) {return adjust_gallery_page();};
 });
 
 {/* delay until document.head exists */
