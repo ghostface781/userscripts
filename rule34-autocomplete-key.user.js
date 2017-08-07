@@ -22,6 +22,10 @@ if (typeof Awesomplete === `function`) {
 				Ev.preventDefault();
 				A.select();};});
 	};
+
+	/* refer to
+	http://developer.mozilla.org/docs/Web/API/KeyboardEvent/key/Key_Values
+	for .key values */
 };
 
 /* -------------------------------------------------------------------------- */
