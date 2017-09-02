@@ -1,9 +1,8 @@
 // ==UserScript==
 // @id             rthirtyfimgpgadj
 // @name           Rule34.xxx: Image Page Adjustments
-// @version        2017-04-01
-// @include        *rule34.xxx/*
-// @domain         rule34.xxx
+// @version        2017-07-07
+// @match          *://*.rule34.xxx/*
 // @downloadURL    https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
 // @run-at         document-start
 // @grant          none
@@ -11,7 +10,7 @@
 
 /* -------------------------------------------------------------------------- */
 
-`use strict`;
+'use strict';
 
 let query_xpath_all = (Expr, Root = document.body) => {
 	let Iter = document.evaluate(
@@ -861,8 +860,8 @@ let adjust_gallery_page = function() {
 /* --- --- */
 
 let on_document_head_loaded = function() {
-	if (location.pathname === `/`) {
-		location.pathname = `/index.php?page=post&s=list`
+	if (location.pathname === `/` && location.search === ``) {
+		location.search = `?page=post&s=list`
 		return;
 	};
 
@@ -877,7 +876,7 @@ let on_document_head_loaded = function() {
 document.addEventListener(`DOMContentLoaded`, function callee() {
 	if (!document.body) {return;};
 	/* only apply to …/index.php?page=post… */
-	if (!/^\/+index.php$/.test(location.pathname)) {return;};
+	if (![`/`, `/index.php`].includes(location.pathname)) {return;};
 
 	let Q = new URLSearchParams(location.search);
 	if (Q.get(`page`) === `favorites`) {return adjust_gallery_page();};
