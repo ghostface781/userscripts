@@ -2,9 +2,9 @@
 // @name        Pixiv: Animation Converter
 // @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @include     *pixiv.net/member_illust.php?*
-// @domain      www.pixiv.net
-// @version     2017-03-21
+// @match       *://*.pixiv.net/member_illust.php?*
+// @version     2017-04-16
+// @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-animation-converter.user.js
 // @run-at      document-end
 // @grant       none
 // ==/UserScript==
@@ -15,13 +15,13 @@ freeze your browser. give it at least two minutes before giving up. */
 
 /*
 PROTIP: convert APNG files to WebM using FFMPEG:
-> ffmpeg -max_fps 60 -i source.png -vsync cfr -r 60 -lossless 1 output.webm
+> ffmpeg -max_fps 60 -i source.apng -vsync cfr -r 60 -crf 20 -b:v 0 output.webm
+
+adjust quality with the "-crf ##" option, where "##" is a number from 0 to 63.
+lower numbers yield higher quality.
+more info: https://trac.ffmpeg.org/wiki/Encode/VP9
 
 the "-r 60" flag sets the output frame rate; feel free to lower it.
-
-to perform lossy encoding, replace "-lossless 1" with "-crf ## -b:v 0",
-where "##" is a number from 0 to 63. lower numbers yield higher quality.
-more info: https://trac.ffmpeg.org/wiki/Encode/VP9
 
 the "-max_fps 60" flag affects the input decoder, is very important because the
 default maximum is too low.
@@ -32,9 +32,14 @@ if you don't specify "-vsync cfr", ffmpeg sometimes doesn't use the correct
 delay on the last frame. I believe this is a bug.
 */
 
+// ffmpeg -default_fps 60 -max_fps 60 -i "%src%" -threads 4 -vsync cfr -r 60 -crf 20 -b:v 0 "%src%.webm"
+
+// 60hz->60hz:
+// ffmpeg -r 60 -i "%src%" -threads 4 -vsync cfr -r 60 -crf 20 -b:v 0 "%src%.webm"
+
 /* -------------------------------------------------------------------------- */
 
-`use strict`;
+'use strict';
 
 let enforce = (X) => {
 	console.assert(X);
@@ -90,7 +95,7 @@ let bloburl_to_blobobj = (Url) => new Promise((resolve, reject) => {
 
 /* https://www.w3.org/TR/PNG/#D-CRCAppendix */
 
-/* table of CRCs of all 8-bit messages */
+/* table of CRCs of all 8-bit combinations */
 let CrcTable;
 
 let make_crc_table = () => {
@@ -345,7 +350,7 @@ let create_convert_button = () => {
 		let X = document.createElement(`a`);
 		X.href = URL.createObjectURL(ApngBlob);
 		X.download = `illust-${Id}-${pixiv.title.original || ""}.apng`;
-		X.dispatchEvent(new MouseEvent("click"));
+		X.dispatchEvent(new MouseEvent(`click`));
 
 		// alternate method:
 		// location.href = URL.createObjectURL(ApngBlob);
