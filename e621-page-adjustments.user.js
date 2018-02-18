@@ -45,6 +45,9 @@ const onDocRdyStCh = () => {
 
 	img.classList.add(`main-image`);
 	img.removeAttribute(`onclick`); /* remove Note.toggle() */
+
+	img.parentElement.style.textAlign = `center`;
+
 	noteBox.style.visibility = `hidden`;
 
 	/* scrollIntoView() only if necessary */
@@ -127,7 +130,7 @@ const enforce = (cond, msg = `enforcement failed`) => {
 /* -------------------------------------------------------------------------- */
 
 const styleRules = () => [
-	`.main-image:not(.full-size), video.main-image {
+	`.main-image:not(.full-size), video.main-image, embed.main-image {
 		max-width : 100vw;
 		max-height : 100vh;}`,
 
