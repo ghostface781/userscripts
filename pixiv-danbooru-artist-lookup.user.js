@@ -1,9 +1,8 @@
 ﻿// ==UserScript==
 // @name        Pixiv: Danbooru Artist X-Ref
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-09-24
+// @version     2018-02-19
 // @description Adds a 'Danbooru' tab to the navigation bar on Pixiv, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki.
-// @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-danbooru-artist-lookup.user.js
 // @match       *://*.pixiv.net/member_illust.php?*
 // @match       *://*.pixiv.net/member.php?*
 // @run-at      document-end
@@ -40,7 +39,7 @@ const entrypoint = () => {
 	let tabs = qs(`.column-header nav .tabs`);
 	if (!tabs) {return;};
 
-	let artistId = (new URL(tabs.querySelector(`a.tab-profile`).href))
+	let artistId = (new URL(tabs.querySelector(`a[href^='/member_illust.php?']`).href))
 		.searchParams.get(`id`);
 	if (!artistId) {return;};
 
