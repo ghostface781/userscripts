@@ -2,7 +2,8 @@
 // @name        e621: Image Page Adjustments
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://e621.net/post/show/*
-// @version     2018-02-17
+// @version     2018-02-23
+// @downloadURL https://github.com/bipface/userscripts/raw/master/e621-page-adjustments.user.js
 // @grant       none
 // @run-at      document-start
 // ==/UserScript==
@@ -32,7 +33,7 @@ const onDocRdyStCh = () => {
 
 	if (!img) {return;};
 
-	img.addEventListener(`click`, ev => {
+	const imgOnClick = () => {
 		let isFullSize = img.classList.contains(`full-size`);
 		if (isFullSize) {
 			img.classList.remove(`full-size`);
@@ -41,7 +42,8 @@ const onDocRdyStCh = () => {
 			img.classList.add(`full-size`);
 			noteBox.style.visibility = ``;
 		};
-	});
+	};
+	img.addEventListener(`click`, imgOnClick);
 
 	img.classList.add(`main-image`);
 	img.removeAttribute(`onclick`); /* remove Note.toggle() */
@@ -50,7 +52,13 @@ const onDocRdyStCh = () => {
 
 	noteBox.style.visibility = `hidden`;
 
-	/* scrollIntoView() only if necessary */
+	/* neutralise e621's own dynamic-resize code: */
+	if (typeof Post !== `undefined`) {
+		Post.fit_to_window = () => {};
+		Post.toggle_size = imgOnClick;
+	};
+
+	/* scrollIntoView() only if necessary: */
 
 	const scroll = el => {
 		let rect = el.getBoundingClientRect();
@@ -131,12 +139,19 @@ const enforce = (cond, msg = `enforcement failed`) => {
 
 const styleRules = () => [
 	`.main-image:not(.full-size), video.main-image, embed.main-image {
-		max-width : 100vw;
-		max-height : 100vh;}`,
+		max-width : 100vw !important;
+		max-height : 100vh !important;
+	}`,
 
 	/*`.main-image.full-size {
 
 	}`,*/
+
+	`img.main-image {
+		/* neutralise e621's own dynamic-resize code: */
+		width : unset !important;
+		height : unset !important;
+	}`,
 ];
 
 /* -------------------------------------------------------------------------- */
