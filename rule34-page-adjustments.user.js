@@ -1,11 +1,11 @@
-// ==UserScript==
-// @id             rthirtyfimgpgadj
-// @name           Rule34.xxx: Image Page Adjustments
-// @version        2017-07-07
-// @match          *://*.rule34.xxx/*
-// @downloadURL    https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
-// @run-at         document-start
-// @grant          none
+﻿// ==UserScript==
+// @id          rthirtyfimgpgadj
+// @name        Rule34.xxx: Image Page Adjustments
+// @version     2018-03-04
+// @match       *://*.rule34.xxx/*
+// @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
+// @run-at      document-start
+// @grant       none
 // ==/UserScript==
 
 /* -------------------------------------------------------------------------- */
@@ -660,8 +660,10 @@ let adjust_image_page = function() {
 		})).observe(Ed, {attributes : true});
 	};
 
-	/* ad space */
-	document.getElementById(`bottom`).remove();
+	{/* ad space */
+		let x = document.getElementById(`bottom`);
+		if (x) {x.remove();};
+	};
 
 	if (false) {/* tag configuration links */
 		let TagList = document.getElementById(`tag-sidebar`);
@@ -823,7 +825,7 @@ let adjust_gallery_page = function() {
 
 	let Content = document.querySelector(`#post-list > .content`);
 	let ImageContainer = Content.querySelector(
-		`#post-list > .content > div:not([id])`
+		`#post-list > .content > div:not([style])`
 	);
 	ImageContainer.classList.add(`image-container`);
 	let Paginator = Content.querySelector(`#paginator`);
@@ -868,6 +870,9 @@ let on_document_head_loaded = function() {
 	if (RegExp(
 		`/(index.php|chat.php|icameout.php|(stats(/[^?]*)?))?(\\?.*)?$`
 	).test(location.pathname+location.search)) {
+		let Q = new URLSearchParams(location.search);
+		if (Q.get(`page`) === `dapi`) {
+			return;};
 		insert_style_rules(GlobalStyleRules);
 	};
 };

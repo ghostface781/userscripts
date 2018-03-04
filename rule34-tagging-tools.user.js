@@ -1,10 +1,9 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name        Rule34.xxx: Tagging Tools
 // @id          rthirtyftaggingtools
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-01-25
-// @include     *rule34.xxx/*
-// @domain      rule34.xxx
+// @version     2018-03-04
+// @match       *://*.rule34.xxx/*
 // @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-tagging-tools.user.js
 // @run-at      document-end
 // @grant       GM_getValue
@@ -12,7 +11,7 @@
 // @grant       GM_deleteValue
 // ==/UserScript==
 
-"use strict";
+'use strict';
 
 /*
 persistent values:
@@ -36,6 +35,8 @@ persistent values:
 /* -------------------------------------------------------------------------- */
 
 let entrypoint = () => {
+	if (![`/`, `/index.php`].includes(location.pathname)) {return;};
+
 	let Q = new URLSearchParams(location.search);
 	if (Q.get(`page`) === `favourites` ||
 		(Q.get(`page`) === `post` && [`list`, `view`].includes(Q.get(`s`)))
@@ -108,8 +109,10 @@ class PageCtrlrº {
 
 		this.SearchBar.Ctrlr.on_query_update();
 
-		/* remove the original tag list header */
-		query_xpath(`../h5/text()[.="Tags"]/..`, this.MainTagSet).remove();
+		{/* remove the original tag list header */
+			let x = query_xpath(`../h5/text()[.="Tags"]/..`, this.MainTagSet);
+			if (x) {x.remove();};
+		};
 	};
 
 	parse_tag_list(TagList) {
@@ -141,7 +144,9 @@ class PageCtrlrº {
 		let NameSet = new Set();
 	
 		let Xs = (for (X of TagList.children)
-			if (X.tagName === `LI` && X.hasChildNodes())
+			if (X.tagName === `LI`
+				&& X.hasChildNodes()
+				&& X.firstElementChild.tagName === `A`)
 			descr_from(X)
 		);
 	
@@ -158,16 +163,25 @@ class PageCtrlrº {
 
 class ImagePageCtrlrº extends PageCtrlrº {
 	constructor(ImageId) {
-		super(function() (
-			this.EditForm = enforce(document.getElementById(`edit_form`)),
+		super(function() {
+			this.EditForm = enforce(document.getElementById(`edit_form`));
 			this.ImageMetaTbl = Object.assign(
 				parse_edit_form(this.EditForm),
-				{TagSet : undefined}),
-			enforce(ImageId === this.ImageMetaTbl.Id),
-			new ImageTagSetCtrlrº(this.ImageMetaTbl)
-		));
+				{TagSet : undefined});
+			enforce(ImageId === this.ImageMetaTbl.Id);
+			return new ImageTagSetCtrlrº(this.ImageMetaTbl);
+		});
 
 		this.MainTagSet.Ctrlr.mark_clean();
+
+		/* sync the edit box with the tag list: */
+		this.MainTagSet.addEventListener(`:tags-mutated`, () => {
+			let tagsForm = this.EditForm.querySelector(`#tags`);
+			tagsForm.value = ``;
+			for (let tag of this.MainTagSet.Ctrlr.InOrderTags) {
+				tagsForm.value += `${tag.Ctrlr.TagDescr.Name} `;
+			};
+		});
 
 		let InitialSourceBox = query_xpath(
 			`//li/text()[contains(., "Source:")]/..`,
@@ -725,7 +739,7 @@ class ImageTagSetCtrlrº extends TagSetCtrlrº {
 		X.set(`lupdated`, this.ImageMetaTbl.Lupdated);
 		X.set(`rating`, this.ImageMetaTbl.Rating);
 		X.set(`title`, this.ImageMetaTbl.Title);
-		X.set(`parent`, this.ImageMetaTbl.Parent);
+		X.set(`parent`, this.ImageMetaTbl.ParentId);
 		X.set(`next_post`, this.ImageMetaTbl.NextId);
 		X.set(`previous_post`, this.ImageMetaTbl.PrevId);
 		X.set(`source`, this.ImageMetaTbl.Source);
@@ -1008,7 +1022,8 @@ class TagCtrlrº {
 		this.El.classList.add(`tag-type-${X.Type}`);
 
 		letx((A = this._q(`link`)) => {
-			A.href = `/index.php?page=post&s=list&tags=${X.Name}`;
+			A.href = `/index.php?page=post&s=list&tags=${
+				encodeURIComponent(X.Name)}`;
 			A.textContent = X.Name.replace(/_/g, ` `);
 		});
 
@@ -1063,7 +1078,7 @@ let parse_edit_form = (Form) => ({
 	Title : Form.querySelector(`#title`).value,
 	Rating : Form.querySelector(`input[name="rating"]:checked`).value,
 	Source : Form.querySelector(`#source`).value,
-	TagSet : new Set(Form.querySelector(`#tags`).value.match(/[^\s]+/)),
+	TagSet : new Set(Form.querySelector(`#tags`).value.match(/[^\s]+/g)),
 	Pconf : Form.querySelector(`#pconf`).value,
 	Lupdated : Form.querySelector(`#lupdated`).value,
 });
