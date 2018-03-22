@@ -2,7 +2,7 @@
 // @name        e621: Image Page Adjustments
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://e621.net/post/show/*
-// @version     2018-02-23
+// @version     2018-03-22
 // @downloadURL https://github.com/bipface/userscripts/raw/master/e621-page-adjustments.user.js
 // @grant       none
 // @run-at      document-start
@@ -33,6 +33,16 @@ const onDocRdyStCh = () => {
 
 	if (!img) {return;};
 
+	/* get original dimensions: */
+	let {orig_width : imgW, orig_height : imgH} = img.dataset;
+	if (!imgW || !imgH) {
+		let el = [...selMany(`#stats li`)].find(el =>
+			el.textContent.includes(`Size:`));
+		let match = /Size: (\d+)x(\d+)/.exec(el.textContent);
+		[imgW, imgH] =
+			match ? [match[1], match[2]] : [0, 0];
+	};
+
 	const imgOnClick = () => {
 		let isFullSize = img.classList.contains(`full-size`);
 		if (isFullSize) {
@@ -56,6 +66,16 @@ const onDocRdyStCh = () => {
 	if (typeof Post !== `undefined`) {
 		Post.fit_to_window = () => {};
 		Post.toggle_size = imgOnClick;
+	};
+
+	/* used by notes: */
+	if (typeof jQuery !== `undefined`) {
+		jQuery(img).data(`width`, imgW);
+		jQuery(img).data(`height`, imgH);
+	};
+
+	if (typeof Note !== `undefined`) {
+		Note.all.invoke(`adjustScale`);
 	};
 
 	/* scrollIntoView() only if necessary: */
@@ -85,28 +105,20 @@ const onDocRdyStCh = () => {
 		x.style.top = `0`;
 		x.style.left = `0`;
 
-		let {width : imgW, height : imgH} = img.dataset;
+		let [scaledW, scaledH] = [imgW, imgH];
 
-		if (!imgW || !imgH) {
-			let el = [...selMany(`#stats li`)].find(el =>
-				el.textContent.includes(`Size:`));
-			let match = /Size: (\d+)x(\d+)/.exec(el.textContent);
-			[imgW, imgH] =
-				match ? [match[1], match[2]] : [0, 0];
-		};
+		if (scaledW > innerWidth) {
+			let r = innerWidth / scaledW;
+			scaledW *= r;
+			scaledH *= r;};
 
-		if (imgW > innerWidth) {
-			let r = innerWidth / imgW;
-			imgW *= r;
-			imgH *= r;};
+		if (scaledH > innerHeight) {
+			let r = innerHeight / scaledH;
+			scaledW *= r;
+			scaledH *= r;};
 
-		if (imgH > innerHeight) {
-			let r = innerHeight / imgH;
-			imgW *= r;
-			imgH *= r;};
-
-		x.style.width = `${imgW}px`;
-		x.style.height = `${imgH}px`;
+		x.style.width = `${scaledW}px`;
+		x.style.height = `${scaledH}px`;
 
 		img.parentElement.style.position = `relative`;
 		img.parentElement.prepend(x);
