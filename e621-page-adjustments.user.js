@@ -2,7 +2,7 @@
 // @name        e621: Image Page Adjustments
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://e621.net/post/show/*
-// @version     2018-03-22
+// @version     2018-03-25
 // @downloadURL https://github.com/bipface/userscripts/raw/master/e621-page-adjustments.user.js
 // @grant       none
 // @run-at      document-start
@@ -32,6 +32,9 @@ const onDocRdyStCh = () => {
 	let noteBox = sel(`#note-container`) || document.createElement(`div`);
 
 	if (!img) {return;};
+
+	/* not compatible with 'Show reduced samples' mode */
+	if (img.dataset.resize_mode === `2`) {return;};
 
 	/* get original dimensions: */
 	let {orig_width : imgW, orig_height : imgH} = img.dataset;
