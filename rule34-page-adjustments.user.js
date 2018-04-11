@@ -122,10 +122,10 @@ let GlobalStyleRules = [
 	`div.has-mail {background-color : #303030 !important;}`,
 
 	`.status-notice,
-	#post-view > div [ /* child posts banner */
-		style="background: #f0f0f0; padding: 10px; `+
-		`text-align: center; border: 3px solid #dadada;"
-	] {
+	#post-view > div /* child posts banner */
+		[style="background: #f0f0f0; padding: 10px; `+
+		`text-align: center; border: 3px solid #dadada;"]
+	{
 		background-color : #303030 !important;
 		border-width : 1px !important;
 		border-color : #505a50 !important;
