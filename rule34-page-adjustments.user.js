@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @id          rthirtyfimgpgadj
 // @name        Rule34.xxx: Image Page Adjustments
-// @version     2018-03-04
+// @version     2018-04-11
 // @match       *://*.rule34.xxx/*
 // @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
 // @run-at      document-start
