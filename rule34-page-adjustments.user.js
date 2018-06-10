@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @id          rthirtyfimgpgadj
 // @name        Rule34.xxx: Image Page Adjustments
-// @version     2018-04-11
+// @version     2018-06-10
 // @match       *://*.rule34.xxx/*
 // @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-page-adjustments.user.js
 // @run-at      document-start
@@ -415,8 +415,13 @@ let adjust_image_page = function() {
 		Img.removeAttribute(`width`);
 		Img.removeAttribute(`height`);
 
-	} else if (Img = document.getElementById(`gelcomVideoPlayer`)) {
+	} else if ((Img = document.getElementById(`gelcomVideoPlayer`))) {
 		Img.removeAttribute(`style`);
+
+		let vidParent = document.getElementById(`gelcomVideoContainer`);
+		if (vidParent) {
+			vidParent.replaceWith(Img);
+		};
 
 	} else {
 		Img = document.createElement(`img`);
