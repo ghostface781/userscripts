@@ -3,9 +3,9 @@
 // @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://*.pixiv.net/member_illust.php?*
-// @version     2017-04-16
+// @version     2018-07-14
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-animation-converter.user.js
-// @run-at      document-end
+// @run-at      document-start
 // @grant       none
 // ==/UserScript==
 
@@ -265,20 +265,20 @@ let pack_png = (Chunks) => {
 
 /* --- pixiv stuff --- */
 
-let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
+let get_frame_pngs = (anim) => new Promise((resolve, reject) => {
 	/* resolves to an array of PNG buffers */
 
 	/* https://github.com/pixiv/zip_player/blob/master/zip_player.js */
-	let Zip = new ZipImagePlayer({
+	let zip = new anim.player.constructor({
 		canvas : document.createElement(`canvas`),
-		source : Meta.src,
-		metadata : Meta,
-		chunkSize : 300000,
+		source : anim.props.meta.originalSrc || anim.props.meta.src,
+		metadata : anim.props.meta,
+		chunkSize : anim.player.op.chunkSize,
 		autoStart : false,
 		autosize : false
 	});
 
-	let Pngs = Array(Meta.frames.length);
+	let Pngs = Array(anim.props.meta.frames.length);
 	let DoneCount = 0;
 
 	let on_png = (Idx, P) => {
@@ -295,11 +295,9 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 		R.readAsArrayBuffer(B);
 	};
 
-	jQuery(Zip).on(`loadingStateChanged`, () => {
-		if (Zip.getLoadedFrames() !== Pngs.length) {return;};
-
+	let on_load = () => {
 		for (let Idx = 0; Idx < Pngs.length; ++Idx) {
-			let Img = Zip._frameImages[Idx];
+			let Img = zip._frameImages[Idx];
 			let C = document.createElement(`canvas`);
 			[C.width, C.height] = [Img.naturalWidth, Img.naturalHeight];
 			C.getContext(`2d`).drawImage(Img, 0, 0);
@@ -307,18 +305,24 @@ let get_frame_pngs = (Meta) => new Promise((resolve, reject) => {
 			/* can't reuse a canvas for multiple frames because toBlob is
 			asynchronous */
 		};
-	});
+	};
+
+	if (zip.getLoadedFrames() === Pngs.length) {
+		on_load();
+	} else {
+		zip.addEventListener(`loadingStateChanged`, () => {
+			if (zip.getLoadedFrames() !== Pngs.length) {return;};
+			on_load();
+			zip = null;
+		});
+	};
 });
 
-let convert = () => new Promise((resolve, reject) => {
+let convert = (anim) => new Promise((resolve, reject) => {
 	/* resolves to a Uint8Array of the APNG file */
 
-	let Meta = pixiv.context.ugokuIllustFullscreenData ||
-		pixiv.context.ugokuIllustData;
-	delete Meta.size; /* size might be incorrect anyway */
-
 	console.log(`retrieving frame images ...`);
-	get_frame_pngs(Meta).then(Pngs => {
+	get_frame_pngs(anim).then(Pngs => {
 		console.log(`... done`);
 
 		console.log(`assembling APNG file ...`);
@@ -329,7 +333,7 @@ let convert = () => new Promise((resolve, reject) => {
 		console.log(`... animating chunks ...`);
 		let ApngChunks = create_apng(
 			UnpackedPngs,
-			Meta.frames.map(X => X.delay)
+			anim.props.meta.frames.map(X => X.delay)
 		);
 
 		console.log(`... repacking chunks ...`);
@@ -340,26 +344,25 @@ let convert = () => new Promise((resolve, reject) => {
 	});
 });
 
-let create_convert_button = () => {
+let create_convert_button = (anim) => {
 	/* ? */
 	let ApngBlob; /* cached result */
 	let IsProcessing = false;
 
 	let open_blob = () => {
-		let Id = (new URLSearchParams(location.search)).get(`illust_id`);
-		let X = document.createElement(`a`);
-		X.href = URL.createObjectURL(ApngBlob);
-		X.download = `illust-${Id}-${pixiv.title.original || ""}.apng`;
-		X.dispatchEvent(new MouseEvent(`click`));
+		let x = document.createElement(`a`);
+		x.href = URL.createObjectURL(ApngBlob);
+		x.download =
+			`illust-${anim.props.illustId}-${anim.props.title || ''}.apng`;
+		x.dispatchEvent(new MouseEvent(`click`));
 
 		// alternate method:
 		// location.href = URL.createObjectURL(ApngBlob);
 	};
 
-	let Btn = document.createElement(`div`);
+	let Btn = document.createElement(`button`);
+	Btn.type = `button`;
 	Btn.textContent = `Convert to APNG`;
-	Btn.classList.add(`_button`);
-	Btn.style.margin = `3px`;
 
 	let Spinner = document.createElement(`img`);
 	Spinner.setAttribute(`src`, SpinnerUri);
@@ -377,7 +380,7 @@ let create_convert_button = () => {
 
 		IsProcessing = true;
 		Btn.update();
-		convert().then((ApngBytes) => {
+		convert(anim).then((ApngBytes) => {
 			ApngBlob = new Blob([ApngBytes], {type : `image/png`});
 			IsProcessing = false;
 			Btn.update();
@@ -389,20 +392,113 @@ let create_convert_button = () => {
 	return Btn;
 };
 
-(function() {/* entrypoint */
-	if (!pixiv.context || pixiv.context.type !== `illust` ||
-		!pixiv.context.ugokuIllustData) {return;};
+const entrypoint = () => {
+	/* avoid greasemonkey bug: */
+	if (document.documentElement.attributes.length === 0) {return;};
 
-	enforce(ZipImagePlayer);
-	enforce(pixiv);
-	enforce(jQuery);
+	{/* init-once: */
+		const attr = `_40f0be515de56f2ae877b41157353cbb`;
+		if (document.documentElement.hasAttribute(attr)) {return;};
+		document.documentElement.setAttribute(attr, ``);
+	};
+	console.log(`pixiv animation converter: initalising`);
 
-	let PlayerBox = document.querySelector(
-		`._ugoku-illust-player-container .player`);
-	if (!PlayerBox) {return;};
-	PlayerBox.parentNode.insertBefore(
-		create_convert_button(), PlayerBox.nextSibiling);
-})();
+	document.addEventListener(`readystatechange`, onDocRdyStCh);
+	onDocRdyStCh();
+};
+
+const onDocRdyStCh = () => {
+	if (document.readyState === `loading`) {return;};
+	document.removeEventListener(`readystatechange`, onDocRdyStCh);
+
+	let x = findMainCanvas();
+	if (x) {
+		onMainCanvas(x);
+	} else {
+		/* main <canvas> not on the page yet */
+		(new MutationObserver(onMutate))
+			.observe(document.documentElement, {
+				childList : true,
+				subtree : true,});
+	};
+};
+
+const findMainCanvas = () => {
+	/* find the main <canvas> element: */
+
+	for (let canv of document.getElementsByTagName(`canvas`)) {
+		let parent = canv.parentElement;
+		if (!(parent instanceof HTMLDivElement)) {continue;};
+
+		let stateNode;
+		{
+			let ks = Object.keys(parent).filter(k =>
+				k.startsWith(`__reactInternalInstance`));
+			if (ks.length !== 1) {continue;};
+
+			let reactInst = parent[ks[0]];
+			if (!reactInst) {continue;};
+			reactInst = reactInst[`return`];
+			if (!reactInst) {continue;};
+			stateNode = reactInst.stateNode;
+			if (!stateNode) {continue;};
+		};
+
+		if (!stateNode.zipPlayer) {continue;};
+		if (!(stateNode.ref instanceof HTMLCanvasElement)) {continue;};
+
+		return ({
+			canvas : stateNode.ref,
+			props : stateNode.props,
+			player : stateNode.zipPlayer,});
+	};
+
+	return null;
+};
+
+const onMutate = (recs, obs) => {
+	let doCheck = false; /* true when main <canvas> might be on the page now */
+
+	for (let i = 0, recCount = recs.length; i < recCount; ++i) {
+		if (doCheck) {break;}
+
+		let r = recs[i];
+		if (r.type !== `childList`) {continue;};
+
+		for (let j = 0; j < r.addedNodes.length; ++j) {
+			let node = r.addedNodes[j];
+			if (node instanceof HTMLCanvasElement
+				|| (node instanceof HTMLElement
+					&& node.childElementCount !== 0
+					&& node.getElementsByTagName(`canvas`).length))
+			{
+				doCheck = true;
+				break;
+			};
+		};
+	};
+
+	if (doCheck) {
+		let x = findMainCanvas();
+		if (x) {
+			obs.disconnect();
+			onMainCanvas(x);
+		};
+	};
+};
+
+const onMainCanvas = (anim) => {
+	console.log(`pixiv animation converter: main canvas acquired`);
+
+	anim.canvas
+		.parentElement
+		.parentElement
+		.nextSibling
+		.querySelector(`.sticky > section`)
+		.append(create_convert_button(anim));
+};
+
+entrypoint();
 
 /* -------------------------------------------------------------------------- */
 
