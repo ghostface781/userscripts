@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name        Danbooru: Image Resizer
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-10-22
+// @version     2018-08-05
 // @match       *://*.donmai.us/*
 // @grant       none
+// @downloadURL https://github.com/bipface/userscripts/raw/master/danbooru-image-resizer.user.js
 // @run-at      document-end
 // ==/UserScript==
 
@@ -13,27 +14,44 @@
 
 const entrypoint = () => {
 	/* only images are supported at the moment */
-	if (!Danbooru || !Danbooru.Post || !img()) {return;};
+	if (!Danbooru || !img()) {return;};
+
+	{/* move image to top of content panel */
+		let c = document.querySelector(`#image-container`);
+		if (c) {
+			c.parentElement.prepend(c);};
+	};
 
 	insert_style_rules(style_rules());
 
-	Danbooru.Post.resize_image_to_window = () => {
-		img().classList.toggle(`constrained`);
-		Danbooru.Note.Box.scale_all();
-	};
-
 	img().classList.add(`constrained`);
 
-	img().addEventListener(`click`, ev => {
-		Danbooru.Post.resize_image_to_window();
-	});
+	img().addEventListener(`click`, resize_image_to_window);
+
+	{/* replace resize link */
+		let a = document.querySelector(`#image-resize-to-window-link`);
+		if (a) {
+			let clone = a.cloneNode(true);
+			a.replaceWith(clone);
+
+			clone.addEventListener(`click`, resize_image_to_window);
+		};
+	};
 
 	document.querySelector(`#page`).scrollIntoView();
 
-	Danbooru.Note.Box.scale_all();
-	document.addEventListener(`readystatechange`, ev => {
+	if (Danbooru.Note) {
 		Danbooru.Note.Box.scale_all();
-	});
+		document.addEventListener(`readystatechange`, ev => {
+			Danbooru.Note.Box.scale_all();
+		});
+	};
+};
+
+const resize_image_to_window = () => {
+	img().classList.toggle(`constrained`);
+	if (Danbooru.Note) {
+		Danbooru.Note.Box.scale_all();};
 };
 
 const img = () => document.querySelector(`img#image`);
