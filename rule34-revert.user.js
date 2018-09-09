@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name        Rule34.xxx: Revert
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2017-06-30
+// @version     2018-09-09
 // @match       *://*.rule34.xxx/*
 // @downloadURL https://github.com/bipface/userscripts/raw/master/rule34-revert.user.js
 // @run-at      document-end
@@ -30,13 +30,15 @@ const entrypoint = () => {
 	let TblEl = document.querySelector(`table#history`);
 	if (!TblEl) {return;};
 
+	insertStyleRules(styleRules());
+
 	/* replace all revert links with fancy new buttons */
 
 	let Btn = document.createElement(`button`);
 	Btn.type = `button`;
-	Btn.innerHTML = [
-		`<span>Revert to this version</span>`,
-		`<img style='display:none; padding:0 1ch;'/>`,].join(``);
+	Btn.innerHTML =
+		`<span>Revert to this version</span>`+
+		`<figure class='revert-status-none'></figure>`;
 
 	for (let El of xpath(`.//a[text()='Revert']`, TblEl)) {
 		let X = Btn.cloneNode(true);
@@ -49,20 +51,19 @@ const on_click = function(Ev) {
 	let Row = Btn.parentElement.parentElement;
 	enforce(Row.tagName === `TR`);
 
-	let set_status = (ImgSrc) => {
-		let Img = Btn.querySelector(`img`);
-		Img.src = ImgSrc;
-		Img.style.display = `initial`;
+	let set_status = (cssClass) => {
+		let Img = Btn.querySelector(`figure`);
+		Img.className = cssClass;
 	};
 
-	set_status(ImgTbl.Spinner);
+	set_status(`revert-status-spinner`);
 	revert_to(Row).then(
 		() => {
-			set_status(ImgTbl.Tick);
+			set_status(`revert-status-tick`);
 			//document.reload(true);
 		},
 		X => {
-			set_status(ImgTbl.Warn);
+			set_status(`revert-status-warn`);
 			let Msg = `Revert failed\n\n${X}`;
 			console.error(Msg);
 			alert(Msg);
@@ -207,8 +208,41 @@ const sets_equal = (S1, S2) => {
 	return true;
 };
 
-const ImgTbl = {
-	Tick : `data:image/png;base64,
+const insertStyleRules = (rules) => {
+	let style = document.createElement(`style`);
+	document.head.appendChild(style);
+	for (let rule of rules) {
+		style.sheet.insertRule(rule, style.sheet.cssRules.length);};
+};
+
+const styleRules = () => [
+	`figure[class^='revert-status-'] {
+		margin : 0 !important;
+		padding : 0 1ch !important;
+	}`,
+
+	`.revert-status-none {
+		display : none !important;
+	}`,
+
+	`.revert-status-tick {
+		display : initial !important;
+		background-image : url(${imgTbl.tick}) !important;
+	}`,
+
+	`.revert-status-warn {
+		display : initial !important;
+		background-image : url(${imgTbl.warn}) !important;
+	}`,
+
+	`.revert-status-spinner {
+		display : initial !important;
+		background-image : url(${imgTbl.spinner}) !important;
+	}`,
+];
+
+const imgTbl = {
+	tick : `data:image/png;base64,
 		iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9i
 		ZSBJbWFnZVJlYWR5ccllPAAAAnZJREFUeNqkk01PE0EYx/+zu/TNanTbGCjWhrCmlp6MGl94
 		kUQ9eOCC8chHMDG9mHjiE/QjePGOJsR4QQ8Q0UOJHqgVA6kiKQXa0th97+4OM1tq25MHJ/lv
@@ -225,7 +259,7 @@ const ImgTbl = {
 		MACI9kBqNfbjbgAAAABJRU5ErkJggg==
 	`.replace(/\s/g, ''),
 
-	Warn : `data:image/png;base64,
+	warn : `data:image/png;base64,
 		iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9i
 		ZSBJbWFnZVJlYWR5ccllPAAAAjBJREFUeNqkk0trE1EUx8/cO49OfGTSRNJMYsA0aVonoYh1
 		3YW71uJCKFQhKqibfgFLwYULsR/AhY+VG1d+C124kJiFIGipmoIZNUXtZDKTycz1njGpaRNU
@@ -241,7 +275,7 @@ const ImgTbl = {
 		TkSuQmCC
 	`.replace(/\s/g, ''),
 
-	Spinner : /* animated png */ `data:image/png;base64,
+	spinner : /* animated png */ `data:image/png;base64,
 		iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOXRFWHRTb2Z0d2FyZQBBbmlt
 		YXRlZCBQTkcgQ3JlYXRvciB2MS42LjIgKHd3dy5waHBjbGFzc2VzLm9yZyl0zchKAAAAOnRF
 		WHRUZWNobmljYWwgaW5mb3JtYXRpb25zADUuMi4xNzsgYnVuZGxlZCAoMi4wLjM0IGNvbXBh
