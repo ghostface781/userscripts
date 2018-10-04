@@ -1,11 +1,11 @@
 ﻿// ==UserScript==
 // @name        Pixiv: Danbooru Artist X-Ref
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2018-02-19
-// @description Adds a 'Danbooru' tab to the navigation bar on Pixiv, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki.
+// @version     2018-10-03
+// @description Adds a 'Danbooru' panel under the '+ Follow' button on Pixiv pages, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki. https://imgur.com/a/tQXTxyf
 // @match       *://*.pixiv.net/member_illust.php?*
 // @match       *://*.pixiv.net/member.php?*
-// @run-at      document-end
+// @run-at      document-idle
 // @grant       GM_xmlhttpRequest
 // ==/UserScript==
 
@@ -15,7 +15,7 @@
 
 const c = (x) => `booru-${x}-bba5bb178fab7bb54d25903eaa910e8c`;
 const qs = (x) => document.querySelector(x);
-const tab_qs = (x) => qs(`#${c('tab')} ${x}`);
+const qsAll = (x) => [...document.querySelectorAll(x)];
 
 const artist_search_link = (artistId) =>
 	`https://danbooru.donmai.us/artists?commit=Search&search%5Burl_matches%5D=${
@@ -36,43 +36,178 @@ const tagSearchLinkFnTbl = {
 };
 
 const entrypoint = () => {
-	let tabs = qs(`.column-header nav .tabs`);
-	if (!tabs) {return;};
+	/* avoid greasemonkey bug: */
+	if (document.documentElement.attributes.length === 0) {return;};
 
-	let artistId = (new URL(tabs.querySelector(`a[href^='/member_illust.php?']`).href))
-		.searchParams.get(`id`);
-	if (!artistId) {return;};
+	{/* init-once: */
+		const attr = `_869734e53721596d28e0e20b60478489`;
+		if (document.documentElement.hasAttribute(attr)) {return;};
+		document.documentElement.setAttribute(attr, ``);
+	};
 
+	(new MutationObserver(onMutate))
+		.observe(document.documentElement, {
+			childList : true,
+			subtree : true,});
+
+	onMutate();
+};
+
+const currentArtistId = function() {
+	/* finding the artist id is annoyingly difficult: */
+
+	let artistId;
+	let illustId;
+	let url = new URL(document.location.href);
+
+	if (url.pathname === `/member_illust.php`) {
+		illustId = url.searchParams.get(`illust_id`);
+		artistId = url.searchParams.get(`id`);
+	};
+
+	if (!artistId) {
+		if (illustId && /^\d+$/.test(`${illustId}`)) {
+			let illustInfo;
+			try {
+				illustInfo = window.eval(`globalInitData.preload.illust`);
+			} catch (x) {};
+	
+			if (typeof illustInfo === `object`
+				&& typeof illustInfo[illustId] === `object`)
+			{
+				artistId = illustInfo[illustId].userId;
+			};
+		};
+	};
+
+	if (!artistId) {
+		let x = xpath(`//a[text()='See all']`
+			+`[starts-with(@href, '/member_illust.php?id=')]`).next();
+		if (!x.done) {
+			artistId = (new URL(x.value.href)).searchParams.get(`id`);};
+	};
+
+	return artistId && /^\d+$/.test(`${artistId}`) ? artistId : null;
+};
+
+let lastObservedArtistId;
+const onMutate = (recs, obs) => {
+	/* true when target elements might be on the page now */
+	let doCheck = false;
+
+	let artistId = currentArtistId();
+	if (artistId && artistId !== lastObservedArtistId) {
+		console.log(`current artist id changed from`,
+			lastObservedArtistId, `to`, artistId);
+
+		lastObservedArtistId = artistId;
+		doCheck = true;
+
+		onArtistChanged();
+	};
+
+	if (!doCheck) {
+		for (let i = 0, recCount = recs.length; i < recCount; ++i) {
+			if (doCheck) {break;}
+	
+			let r = recs[i];
+			if (r.type !== `childList`) {continue;};
+	
+			for (let j = 0; j < r.addedNodes.length; ++j) {
+				let node = r.addedNodes[j];
+				if (node instanceof HTMLButtonElement
+					|| (node instanceof HTMLElement
+						&& node.childElementCount !== 0
+						&& node.getElementsByTagName(`button`).length))
+				{
+					doCheck = true;
+					break;
+				};
+			};
+		};
+	};
+
+	if (doCheck) {
+		let xs = findFollowBtns();
+		if (xs.length) {
+			xs.forEach(onFollowBtnFound);
+		};
+	};
+};
+
+const findFollowBtns = () => {
+	const excludeClassName = c(`follow-btn-extended`);
+
+	let btns = [];
+	for (let btn of document.getElementsByTagName(`button`)) {
+		if (btn.getAttribute(`data-click-label`) !== `follow`) {continue;};
+		if (btn.classList.contains(excludeClassName)) {continue;};
+		btns.push(btn);
+	};
+	return btns;
+};
+
+const onArtistChanged = function() {
+	/* clean up so the augmentation code will run again: */
+
+	for (let el of [...document.getElementsByClassName(c(`toolbar`))]) {
+		el.remove();
+	};
+
+	let className = c(`follow-btn-extended`);
+	for (let b of [...document.getElementsByClassName(className)]) {
+		b.classList.remove(className);
+	};
+};
+
+const onFollowBtnFound = function(followBtn) {
 	insert_style_rules(style_rules());
 
-	tabs.lastElementChild.insertAdjacentHTML(
+	let artistId = currentArtistId();
+	if (!artistId) {
+		console.log(`failed to determine artist id`);
+		return;
+	};
+
+	followBtn.classList.add(c(`follow-btn`));
+	followBtn.classList.add(c(`follow-btn-extended`));
+	followBtn.parentElement.classList.add(c(`toolbar-parent`));
+
+	let toolbarId = `toolbar-`+uuid();
+	followBtn.insertAdjacentHTML(
 		`afterend`,
-		`<li id="${c('tab')}"><a><!--
+		`<div id="${toolbarId}" class="${c('toolbar')}"><a><!--
 			--><span class="${c('main-text')}">Danbooru</span><!--
 			--><figure class="${c('status')}"></figure><!--
 			--><span class="${c('tag-ctrls')}" style="display:none"></span><!--
-		--></a></li>`);
+		--></a></div>`);
 
-	tab_qs(`a`).href = artist_search_link(artistId);
+	const toolbarQs = (x) => qs(`#${toolbarId} ${x}`);
 
-	tab_qs(`.${c('status')}`).style.backgroundImage =
+	toolbarQs(`a`).href = artist_search_link(artistId);
+
+	toolbarQs(`.${c('status')}`).style.backgroundImage =
 		`url('${imgTbl.spinner}')`;
 
 	const on_fail = () => {
-		tab_qs(`.${c('tag-ctrls')}`).style.display = `none`;
-		tab_qs(`.${c('status')}`).style.display = `none`;
+		if (!toolbarQs(``)) {return;};
 
-		qs(`#${c('tab')} > a`).style.textDecorationLine = `line-through`;
-		qs(`#${c('tab')} > a`).style.filter = `saturate(0%) opacity(50%)`;
+		toolbarQs(`.${c('tag-ctrls')}`).style.display = `none`;
+		toolbarQs(`.${c('status')}`).style.display = `none`;
+
+		toolbarQs(`> a`).style.textDecorationLine = `line-through`;
+		toolbarQs(`> a`).style.filter = `saturate(0%) opacity(50%)`;
 	};
 
 	const on_success = (booruArtistId, artistTag) => {
-		tab_qs(`a`).href = artist_page_link(booruArtistId);
+		if (!toolbarQs(``)) {return;};
 
-		tab_qs(`.${c('status')}`).style.display = `none`;
-		tab_qs(`.${c('tag-ctrls')}`).style.display = ``;
+		toolbarQs(`a`).href = artist_page_link(booruArtistId);
 
-		tab_qs(`.${c('tag-ctrls')}`).insertAdjacentHTML(
+		toolbarQs(`.${c('status')}`).style.display = `none`;
+		toolbarQs(`.${c('tag-ctrls')}`).style.display = ``;
+
+		toolbarQs(`.${c('tag-ctrls')}`).insertAdjacentHTML(
 			`beforeend`,
 			/* meaningless href */
 			`<a class="${c('tag')}"
@@ -80,7 +215,7 @@ const entrypoint = () => {
 				href="copy-to-clipboard:${escape_xml(artistTag)}"
 				>${escape_xml(artistTag)}</a>`);
 
-		tab_qs(`.${c('tag')}`).addEventListener(`click`, ev => {
+		toolbarQs(`.${c('tag')}`).addEventListener(`click`, ev => {
 			ev.preventDefault();
 
 			/* select the element */
@@ -95,12 +230,10 @@ const entrypoint = () => {
 
 		for (let site of Object.keys(tagSearchLinkFnTbl)) {
 			let link = tagSearchLinkFnTbl[site](artistTag);
-			tab_qs(`.${c('tag-ctrls')}`).insertAdjacentHTML(
+			toolbarQs(`.${c('tag-ctrls')}`).insertAdjacentHTML(
 				`beforeend`,
-				`<a class="${c('tag-search-link')}"
-					href="${escape_xml(link)}"
-					><figure
-						style="background-image : url('${imgTbl[site]}')"
+				`<a class="${c('tag-search-link')}" href="${escape_xml(link)}"
+					><figure style="background-image : url('${imgTbl[site]}')"
 						></figure></a>`);
 		};
 	};
@@ -168,61 +301,103 @@ const enforce = (cond, msg = `enforcement failed`) => {
 	return cond;
 };
 
+const uuid = function() {
+	return [...Array(32)]
+		.map(_ => Math.floor(16 * Math.random()).toString(16))
+		.join(``);
+};
+
 /* -------------------------------------------------------------------------- */
 
 const style_rules = () => [
-	`#${c('tab')} * {
+	`.${c('toolbar')} {
+		text-align : center;
+		background-color : hsl(0, 0%, 88%);
+	}`,
+
+	`.${c('toolbar-parent')} {
+		display : flex;
+		flex-direction : column;
+		min-width : 200px;
+		width : unset;
+	}`,
+
+	`.${c('toolbar-parent')} > * {
+		padding : 9px 15px;
+	}`,
+
+	`.${c('toolbar-parent')} > *:nth-child(1) {
+		border-top-right-radius : 16px;
+		border-bottom-right-radius : 0;
+		border-top-left-radius : 16px;
+		border-bottom-left-radius : 0;
+	}`,
+
+	`.${c('toolbar-parent')} > *:nth-child(2) {
+		border-top-right-radius : 0;
+		border-bottom-right-radius : 16px;
+		border-top-left-radius : 0;
+		border-bottom-left-radius : 16px;
+	}`,
+
+	`.${c('toolbar')} * {
 		text-decoration : none;
 	}`,
 
-	`#${c('tab')} > a {
+	`.${c('toolbar')} figure {
+		margin : 0;
+	}`,
+
+	`.${c('toolbar')} > a {
 		display : inline-flex;
 		flex-direction : row;
 		align-items : center;
 	}`,
 
-	`#${c('tab')} > a > span {
+	`.${c('toolbar')} > a > span {
 		margin-right : 0.4em;
 	}`,
 
-	`#${c('tab')} .${c('main-text')}:hover {
+	`.${c('toolbar')} .${c('main-text')}:hover {
 		text-decoration-line : underline;
 	}`,
 
-	`#${c('tab')} .${c('status')} {
+	`.${c('toolbar')} .${c('status')} {
 		width : 16px;
 		height : 16px;
 	}`,
 
-	`#${c('tab')} .${c('tag-ctrls')} {
+	`.${c('toolbar')} .${c('tag-ctrls')} {
 		font-size : 80%;
 		color : initial;
 	}`,
 
-	`#${c('tab')} .${c('tag-ctrls')} * {
+	`.${c('toolbar')} .${c('tag-ctrls')} * {
 		color : initial;
 	}`,
 
-	`#${c('tab')} .${c('tag-ctrls')}:before {
+	`.${c('toolbar')} .${c('tag-ctrls')}:before {
 		content : '( ';
 	}`,
-	`#${c('tab')} .${c('tag-ctrls')}:after {
+	`.${c('toolbar')} .${c('tag-ctrls')}:after {
 		content : ' )';
 	}`,
 
-	`#${c('tab')} .${c('tag-ctrls')} > a {
+	`.${c('toolbar')} .${c('tag-ctrls')} > a {
 		padding : initial;
 	}`,
 
-	`#${c('tab')} .${c('tag-ctrls')} > * {
+	`.${c('toolbar')} .${c('tag-ctrls')} > * {
 		margin : 0 0.1em;
 	}`,
 
-	`#${c('tab')} .${c('tag-search-link')} {
+	`.${c('toolbar')} .${c('tag-search-link')} {
 		vertical-align : middle;
 	}`,
 
-	`#${c('tab')} .${c('tag-search-link')} > figure {
+	`.${c('toolbar')} .${c('tag-search-link')} > figure {
+		display : inline-block;
+		vertical-align : bottom;
 		width : 16px;
 		height : 16px;
 	}`,
