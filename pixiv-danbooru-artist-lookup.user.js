@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name        Pixiv: Danbooru Artist X-Ref
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2018-10-03
+// @version     2018-10-04
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-danbooru-artist-lookup.user.js
 // @description Adds a 'Danbooru' panel under the '+ Follow' button on Pixiv pages, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki. https://imgur.com/a/tQXTxyf
 // @match       *://*.pixiv.net/member_illust.php?*
@@ -46,12 +46,12 @@ const entrypoint = () => {
 		document.documentElement.setAttribute(attr, ``);
 	};
 
-	(new MutationObserver(onMutate))
-		.observe(document.documentElement, {
-			childList : true,
-			subtree : true,});
+	let obs = new MutationObserver(onMutate);
+	obs.observe(document.documentElement, {
+		childList : true,
+		subtree : true,});
 
-	onMutate();
+	onMutate([], obs);
 };
 
 const currentArtistId = function() {
@@ -247,14 +247,27 @@ const onFollowBtnFound = function(followBtn) {
 		ontimeout : on_fail,
 		onload : resp => {
 			try {
-				enforce(resp.status === 200);
+				enforce(resp.status === 200, `http request failed`);
 	
 				let doc = (new DOMParser)
 					.parseFromString(resp.responseText, `text/html`);
 	
 				let trs = [...doc.querySelectorAll(
 					`#a-index > table > tbody > tr`)];
-				enforce(trs.length === 1);
+
+				enforce(0 < trs.length, `no results found`);
+				enforce(trs.length < 10, `too many results found`);
+
+				if (trs.length > 1) {
+					/* try filtering out 'deleted' rows: */
+					trs = trs.filter(r =>
+						r && r.childElementCount > 0
+							&& ([].slice.call(r.children, -1)[0] || {})
+								.textContent !== `Deleted`);
+				};
+
+				enforce(0 < trs.length, `no results found`);
+				enforce(trs.length === 1, `multiple/ambiguous results found`);
 
 				let booruArtistId = /artist-(\d+)/.exec(trs[0].id)[1];
 				let artistTag = trs[0]
@@ -263,7 +276,8 @@ const onFollowBtnFound = function(followBtn) {
 
 				on_success(booruArtistId, artistTag);
 
-			} catch (_) {
+			} catch (x) {
+				console.error(`tag lookup failed for artist ${artistId},`, `${x}`);
 				on_fail();};
 		},
 	});
