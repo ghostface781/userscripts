@@ -2,6 +2,7 @@
 // @name        Pixiv: Danbooru Artist X-Ref
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @version     2018-10-03
+// @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-danbooru-artist-lookup.user.js
 // @description Adds a 'Danbooru' panel under the '+ Follow' button on Pixiv pages, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki. https://imgur.com/a/tQXTxyf
 // @match       *://*.pixiv.net/member_illust.php?*
 // @match       *://*.pixiv.net/member.php?*
