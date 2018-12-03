@@ -3,7 +3,7 @@
 // @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://*.pixiv.net/member_illust.php?*
-// @version     2018-09-30
+// @version     2018-12-03
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-animation-converter.user.js
 // @run-at      document-start
 // @grant       none
@@ -32,10 +32,15 @@ if you don't specify "-vsync cfr", ffmpeg sometimes doesn't use the correct
 delay on the last frame. I believe this is a bug.
 */
 
-// ffmpeg -default_fps 60 -max_fps 60 -i "%src%" -threads 4 -vsync cfr -r 60 -crf 20 -b:v 0 "%src%.webm"
+// ffmpeg -default_fps 60 -max_fps 60 -i "%src%" ^
+//	-threads 4 -vsync cfr -r 60 -crf 20 -b:v 0 "%src%.webm"
 
 // 60hz->60hz:
 // ffmpeg -r 60 -i "%src%" -threads 4 -vsync cfr -r 60 -crf 20 -b:v 0 "%src%.webm"
+
+// vp8:
+// ffmpeg -default_fps 60 -max_fps 60 -i "%src%" ^
+//	-c:v libvpx -threads 4 -r 60 -crf 20 -b:v 0 -auto-alt-ref 0 "%src%.webm"
 
 /* -------------------------------------------------------------------------- */
 
@@ -491,11 +496,11 @@ const onMainCanvas = (anim) => {
 	console.log(`pixiv animation converter: main canvas acquired`);
 	console.log(anim.canvas);
 
-	anim.canvas
+	let canvContainer = anim.canvas.parentElement.parentElement;
+
+	canvContainer
 		.parentElement
-		.parentElement
-		.nextSibling
-		.querySelector(`section`)
+		.querySelector(`.${canvContainer.className} ~ * section`)
 		.append(create_convert_button(anim));
 };
 
