@@ -1,11 +1,12 @@
 ﻿// ==UserScript==
 // @name        Pixiv: Danbooru Artist X-Ref
 // @namespace   6930e44863619d3f19806f68f74dbf62
-// @version     2018-10-04
+// @version     2019-01-13
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-danbooru-artist-lookup.user.js
 // @description Adds a 'Danbooru' panel under the '+ Follow' button on Pixiv pages, which attempts to display the artist's Danbooru tag by seaching them on the Danbooru wiki. https://imgur.com/a/tQXTxyf
 // @match       *://*.pixiv.net/member_illust.php?*
 // @match       *://*.pixiv.net/member.php?*
+// @match       *://*.pixiv.net/bookmark.php?*
 // @run-at      document-idle
 // @grant       GM_xmlhttpRequest
 // ==/UserScript==
@@ -61,7 +62,10 @@ const currentArtistId = function() {
 	let illustId;
 	let url = new URL(document.location.href);
 
-	if (url.pathname === `/member_illust.php`) {
+	if (url.pathname === `/member_illust.php`
+		|| url.pathname === `/member.php`
+		|| url.pathname === `/bookmark.php`)
+	{
 		illustId = url.searchParams.get(`illust_id`);
 		artistId = url.searchParams.get(`id`);
 	};
@@ -82,8 +86,8 @@ const currentArtistId = function() {
 	};
 
 	if (!artistId) {
-		let x = xpath(`//a[text()='See all']`
-			+`[starts-with(@href, '/member_illust.php?id=')]`).next();
+		let x = xpath(`//a[text()='Illustrations']`
+			+`[starts-with(@href, '/member_illust.php?')]`).next();
 		if (!x.done) {
 			artistId = (new URL(x.value.href)).searchParams.get(`id`);};
 	};
