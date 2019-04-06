@@ -73,7 +73,13 @@ const bindInlineView = async function(state, doc, view) {
 		view.removeChild(view.firstChild);};
 
 	view.insertAdjacentHTML(`beforeend`,
-		`<img id='image' class='${qualName('current-image')}' src=''></img>`);
+		`<div class='${qualName('iv-ctrls')}'>
+			<div class='${qualName('status')}'></div>
+			<a title='Previous' class='${qualName('prev')}' href='#'></a>
+			<a title='Next' class='${qualName('next')}' href='#'></a>
+			<a title='Close' class='${qualName('close')}' href='#'></a>
+		</div>
+		<img id='image' class='${qualName('current-image')}' src=''></img>`);
 
 	let imgElem = enforce(view.getElementsByClassName(
 		qualName(`current-image`))[0]);
@@ -138,7 +144,7 @@ const ensureInlineView = function(state, doc, parentElem) {
 
 	if (parentElem && containerElem === null) {
 		containerElem = doc.createElement(`div`);
-		containerElem.classList.add(qualName(`container`));
+		containerElem.classList.add(qualName(`iv-container`));
 		parentElem.append(containerElem);
 	};
 
@@ -148,7 +154,7 @@ const ensureInlineView = function(state, doc, parentElem) {
 const getInlineView = function(state, parentElem) {
 	let containerElem = null;
 	if (parentElem) {
-		let xs = parentElem.getElementsByClassName(qualName(`container`));
+		let xs = parentElem.getElementsByClassName(qualName(`iv-container`));
 		if (xs.length > 1) {
 			return null;};
 		if (xs.length === 1) {
@@ -315,6 +321,16 @@ const tryGetPostInfo = async function(state, postId) {
 	return info;
 };
 
+const tryNavigatePostInfo = async function(
+	state, postId, direction, searchQuery)
+{
+	enforce(isPostId(postId));
+	enforce(direction === `prev` || direction === `next`);
+
+	// todo
+	throw `todo`;
+};
+
 /* --- api urls --- */
 
 const requestPostInfoByIdUrl = function(state, postId) {
@@ -435,8 +451,50 @@ const ensureApplyStyleRules = function(doc, getRules) {
 };
 
 const getGlobalStyleRules = () => [
-	`.${qualName('container')} {
+	`.${qualName('iv-container')} {
+		display : flex;
+		flex-direction : column;
+		align-items : center;
+		justify-content : flex-start;
 		min-height : 10rem;
+	}`,
+
+	`.${qualName('iv-ctrls')} {
+		display : flex;
+		flex-direction : row;
+		align-items : stretch;
+		justify-content : center;
+		min-width : 50rem;
+		min-height : 3rem;
+		background-color : hsl(0, 0%, 40%);
+	}`,
+
+	`.${qualName('iv-ctrls')} > * {
+		flex-grow : 1;
+	}`,
+
+	`.${qualName('iv-ctrls')} > a {
+		background-position : center;
+		background-repeat : no-repeat;
+		background-size : 2rem;
+		opacity : 0.5;
+	}`,
+
+	`.${qualName('iv-ctrls')} > a:hover {
+		background-color : hsl(0, 0%, 50%);
+		opacity : 1;
+	}`,
+
+	`.${qualName('iv-ctrls')} > a.${qualName('prev')} {
+		background-image : url(${svgCircleArrowLeftUrl});
+	}`,
+
+	`.${qualName('iv-ctrls')} > a.${qualName('next')} {
+		background-image : url(${svgCircleArrowRightUrl});
+	}`,
+
+	`.${qualName('iv-ctrls')} > a.${qualName('close')} {
+		background-image : url(${svgCircleArrowUpUrl});
 	}`,
 
 	`.thumb {
@@ -472,7 +530,7 @@ const getGlobalStyleRules = () => [
 	`.thumb > .${qualName('thumb-overlay')}
 		> a.${qualName('thumb-ex-link')}:hover
 	{
-		background-image : url(${svgCircleLinkDataUri});
+		background-image : url(${svgCircleLinkUrl});
 		background-color : hsl(233, 100%, 75%);
 	}`,
 
@@ -481,7 +539,7 @@ const getGlobalStyleRules = () => [
 	.thumb.${qualName('selected')} > .${qualName('thumb-overlay')}
 		> a.${qualName('thumb-in-link')}
 	{
-		background-image : url(${svgCircleArrowDownDataUri});
+		background-image : url(${svgCircleArrowDownUrl});
 		background-color : hsl(33, 100%, 75%);
 	}`,
 ];
@@ -502,10 +560,10 @@ const svgCircleArrow = function(rot = 0) {
 				8-16-15-16 15-8-8 24-24z'/>
 	</svg>`;
 };
-const svgCircleArrowUpDataUri = svgBlobUrl(svgCircleArrow(0));
-const svgCircleArrowRightDataUri = svgBlobUrl(svgCircleArrow(90));
-const svgCircleArrowDownDataUri = svgBlobUrl(svgCircleArrow(180));
-const svgCircleArrowLeftDataUri = svgBlobUrl(svgCircleArrow(270));
+const svgCircleArrowUpUrl = svgBlobUrl(svgCircleArrow(0));
+const svgCircleArrowRightUrl = svgBlobUrl(svgCircleArrow(90));
+const svgCircleArrowDownUrl = svgBlobUrl(svgCircleArrow(180));
+const svgCircleArrowLeftUrl = svgBlobUrl(svgCircleArrow(270));
 
 const svgCircleLink =
 	`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'>
@@ -524,7 +582,7 @@ const svgCircleLink =
 				4.933-4.057 8.99-8.99 8.99H18.365c-4.933
 				0-8.99-4.057-8.99-8.99s4.057-8.988 8.99-8.988z'/>
 	</svg>`;
-const svgCircleLinkDataUri = svgBlobUrl(svgCircleLink);
+const svgCircleLinkUrl = svgBlobUrl(svgCircleLink);
 
 /* -------------------------------------------------------------------------- */
 
