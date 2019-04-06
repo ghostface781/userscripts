@@ -29,12 +29,13 @@ const entrypoint = function() {
 		domain : string,
 		searchQuery : string,
 		currentPostId : int,
+		scaleMode : `fit` / `full`,
 	}
 */
 
 const namespace = `inline-gallery-view`;
 
-const qualName = function(n, ns = namespace) {
+const qual = function(n, ns = namespace) {
 	return ns+`-`+n;
 };
 
@@ -72,23 +73,68 @@ const bindInlineView = async function(state, doc, view) {
 	while (view.hasChildNodes()) {
 		view.removeChild(view.firstChild);};
 
-	view.insertAdjacentHTML(`beforeend`,
-		`<div class='${qualName('iv-ctrls')}'>
-			<div class='${qualName('status')}'></div>
-			<a title='Previous' class='${qualName('prev')}' href='#'></a>
-			<a title='Next' class='${qualName('next')}' href='#'></a>
-			<a title='Close' class='${qualName('close')}' href='#'></a>
-		</div>
-		<img id='image' class='${qualName('current-image')}' src=''></img>`);
+	let baseHref = doc.location.href;
 
-	let imgElem = enforce(view.getElementsByClassName(
-		qualName(`current-image`))[0]);
+	let scaleHref = stateAsFragment(
+		{...state,
+			scaleMode : state.scaleMode === `fit` ? `full` : `fit`},
+		baseHref);
+
+	let prevHref = `#`;
+
+	let exHref = postPageUrl(state, state.currentPostId).href;
+
+	let nextHref = `#`;
+
+	let closeHref = `#`;
+
+	view.insertAdjacentHTML(`beforeend`,
+		`<div class='${qual('iv-ctrls')}'>
+			<a title='Toogle Size' class='${qual('scale')}'
+				href='${escapeAttr(scaleHref)}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+			<a title='Previous' class='${qual('prev')}'
+				href='${escapeAttr(prevHref)}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+			<a title='#${state.currentPostId}' class='${qual('ex')}'
+				href='${escapeAttr(exHref)}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+			<a title='Next' class='${qual('next')}'
+				href='${escapeAttr(nextHref)}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+			<a title='Close' class='${qual('close')}'
+				href='${escapeAttr(closeHref)}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+		</div>
+		<div class='${qual('iv-content-stack')}'>
+			<img id='image' class='${qual('iv-image')}' src=''></img>
+			<img class='${qual('iv-image-placeholder')}' src=''></img>
+		</div>`);
+
+	let stackElem = enforce(view.getElementsByClassName(
+		qual(`iv-content-stack`))[0]);
+
+	let imgElem = enforce(view.getElementsByClassName(qual(`iv-image`))[0]);
+
+	let phldrElem = enforce(view.getElementsByClassName(
+		qual(`iv-image-placeholder`))[0]);
 
 	let info = await tryGetPostInfo(state, state.currentPostId);
 	if (info) {
-		imgElem.style.minWidth = `${info.width|0}px`;
-		imgElem.style.minHeight = `${info.height|0}px`;
-		imgElem.src = imageUrl(state, info.imagePath);};
+		//stackElem.style.width = (info.width|0)+`px`;
+		//stackElem.style.height = (info.height|0)+`px`;
+		stackElem.classList.toggle(
+			qual('scale-fit'), state.scaleMode === `fit`);
+
+		//phldrElem.src = `data:image/svg+xml,`+encodeURIComponent(
+		//	svgEmptyPlaceholder(info.width, info.height));
+		//let phldrBlobHref = svgBlobHref(
+		//	svgEmptyPlaceholder(info.width, info.height));
+		//phldrElem.src = phldrBlobHref;
+		//phldrElem.outerHTML = svgEmptyPlaceholder(info.width, info.height);
+
+		imgElem.src = imageUrl(state, info.imagePath);
+	};
 };
 
 const bindThumbnailsList = function(state, doc, thumbsParent) {
@@ -103,7 +149,7 @@ const bindThumbnail = function(state, doc, thumb) {
 	if (!isPostId(postId)) {
 		return null;};
 
-	thumb.classList.toggle(qualName(`selected`),
+	thumb.classList.toggle(qual(`selected`),
 		postId === state.currentPostId);
 
 	ensureThumbnailOverlay(state, doc, thumb, postId, extUrl);
@@ -113,7 +159,7 @@ const ensureThumbnailOverlay = function(state, doc, thumb, postId, extUrl) {
 	enforce(thumb instanceof HTMLElement);
 
 	{
-		let xs = thumb.getElementsByClassName(qualName(`thumb-overlay`));
+		let xs = thumb.getElementsByClassName(qual(`thumb-overlay`));
 		if (xs.length > 1) {
 			return null;};
 	
@@ -122,16 +168,20 @@ const ensureThumbnailOverlay = function(state, doc, thumb, postId, extUrl) {
 	};
 
 	let ovr = doc.createElement(`div`);
-	ovr.classList.add(qualName(`thumb-overlay`));
+	ovr.classList.add(qual(`thumb-overlay`));
 
 	let inUrl = stateAsFragment(
 		{...state, currentPostId : postId},
 		doc.location.href);
 
+	let title = thumbnailTitle(state, thumb);
+
 	ovr.insertAdjacentHTML(`beforeend`,
-		`<a class='${qualName('thumb-ex-link')}'
+		`<a class='${qual('thumb-ex-link')}'
+			title='${escapeAttr(title)}'
 			href='${escapeAttr(extUrl.href)}'></a>
-		<a class='${qualName('thumb-in-link')}'
+		<a class='${qual('thumb-in-link')}'
+			title='${escapeAttr(title)}'
 			href='${escapeAttr(inUrl)}'></a>`);
 
 	thumb.prepend(ovr);
@@ -144,7 +194,7 @@ const ensureInlineView = function(state, doc, parentElem) {
 
 	if (parentElem && containerElem === null) {
 		containerElem = doc.createElement(`div`);
-		containerElem.classList.add(qualName(`iv-container`));
+		containerElem.classList.add(qual(`iv-container`));
 		parentElem.append(containerElem);
 	};
 
@@ -154,7 +204,7 @@ const ensureInlineView = function(state, doc, parentElem) {
 const getInlineView = function(state, parentElem) {
 	let containerElem = null;
 	if (parentElem) {
-		let xs = parentElem.getElementsByClassName(qualName(`iv-container`));
+		let xs = parentElem.getElementsByClassName(qual(`iv-container`));
 		if (xs.length > 1) {
 			return null;};
 		if (xs.length === 1) {
@@ -211,6 +261,20 @@ const thumbnailUrl = function(state, elem) {
 	};
 
 	return url;
+};
+
+const thumbnailTitle = function(state, elem) {
+	enforce(elem instanceof HTMLElement);
+
+	let xs = elem.getElementsByClassName(`preview`);
+	if (xs.length !== 1) {
+		return ``;};
+
+	let title = xs[0].title;
+	if (typeof title !== `string`) {
+		return ``;};
+
+	return title.trim();
 };
 
 const isPostId = function(id) {
@@ -331,7 +395,7 @@ const tryNavigatePostInfo = async function(
 	throw `todo`;
 };
 
-/* --- api urls --- */
+/* --- urls --- */
 
 const requestPostInfoByIdUrl = function(state, postId) {
 	enforce(isPostId(postId));
@@ -339,6 +403,14 @@ const requestPostInfoByIdUrl = function(state, postId) {
 	let url = new URL(
 		`https://rule34.xxx/?page=dapi&s=post&q=index&json=1&limit=1`);
 	url.searchParams.set(`tags`, `id:${postId}`);
+	return url;
+};
+
+const postPageUrl = function(state, postId) {
+	enforce(isPostId(postId));
+
+	let url = new URL(`https://rule34.xxx/index.php?page=post&s=view`);
+	url.searchParams.set(`id`, `${postId}`);
 	return url;
 };
 
@@ -353,7 +425,7 @@ const sampleImageUrl = function(state, imagePath) {
 		+`${imgPath.dir}/sample_${imgPath.filename}`);
 };
 
-/* --- ? --- */
+/* --- utilities --- */
 
 const tryParseHref = function(href) {
 	try {
@@ -437,13 +509,13 @@ const ensureApplyStyleRules = function(doc, getRules) {
 	enforce(doc instanceof HTMLDocument);
 	enforce(doc.head instanceof HTMLHeadElement);
 
-	if (doc.getElementById(qualName(`global-stylesheet`))
+	if (doc.getElementById(qual(`global-stylesheet`))
 		instanceof HTMLStyleElement)
 	{
 		return;};
 
 	let style = doc.createElement(`style`);
-	style.id = qualName(`global-stylesheet`);
+	style.id = qual(`global-stylesheet`);
 	doc.head.appendChild(style);
 
 	for (let rule of getRules()) {
@@ -451,7 +523,18 @@ const ensureApplyStyleRules = function(doc, getRules) {
 };
 
 const getGlobalStyleRules = () => [
-	`.${qualName('iv-container')} {
+	/* --- vars --- */
+
+	`:root {
+		--${qual('c-base')} : hsl(0, 0%, 40%);
+		--${qual('c-base-active')} : hsl(0, 0%, 50%);
+		--${qual('c-iv-action')} : hsl(33, 100%, 75%);
+		--${qual('c-ex-link')} : hsl(233, 100%, 75%);
+	}`,
+
+	/* --- inline view --- */
+
+	`.${qual('iv-container')} {
 		display : flex;
 		flex-direction : column;
 		align-items : center;
@@ -459,43 +542,81 @@ const getGlobalStyleRules = () => [
 		min-height : 10rem;
 	}`,
 
-	`.${qualName('iv-ctrls')} {
+	`.${qual('iv-content-stack')}.${qual('scale-fit')},
+	.${qual('iv-content-stack')}.${qual('scale-fit')} > *
+	{
+		max-width : 100vw;
+		max-height : 100vh;
+	}`,
+
+	/* --- controls --- */
+
+	`.${qual('iv-ctrls')} {
 		display : flex;
 		flex-direction : row;
 		align-items : stretch;
 		justify-content : center;
 		min-width : 50rem;
 		min-height : 3rem;
-		background-color : hsl(0, 0%, 40%);
+		background-color : var(--${qual('c-base')});
 	}`,
 
-	`.${qualName('iv-ctrls')} > * {
+	`.${qual('iv-ctrls')} > * {
+		/* equal sizes: */
+		flex-basis : 0;
 		flex-grow : 1;
+
+		/* centre contents: */
+		display : flex;
+		align-items : center;
+		justify-content : center;
 	}`,
 
-	`.${qualName('iv-ctrls')} > a {
-		background-position : center;
-		background-repeat : no-repeat;
-		background-size : 2rem;
+	`.${qual('iv-ctrls')} > a {
 		opacity : 0.5;
 	}`,
 
-	`.${qualName('iv-ctrls')} > a:hover {
-		background-color : hsl(0, 0%, 50%);
+	`.${qual('iv-ctrls')} > a:hover {
+		background-color : var(--${qual('c-base-active')});
 		opacity : 1;
 	}`,
 
-	`.${qualName('iv-ctrls')} > a.${qualName('prev')} {
+	`.${qual('iv-ctrls')} > * > .${qual('btn-icon')} {
+		margin : 0;
+		width : 2rem;
+		height : 2rem;
+		background-size : cover;
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('scale')} > .${qual('btn-icon')} {
+		background-image : url(${svgCircleRingUrl});
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('prev')} > .${qual('btn-icon')} {
 		background-image : url(${svgCircleArrowLeftUrl});
 	}`,
 
-	`.${qualName('iv-ctrls')} > a.${qualName('next')} {
+	`.${qual('iv-ctrls')} > .${qual('ex')}:hover {
+		background-color : var(--${qual('c-ex-link')});
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('ex')} > .${qual('btn-icon')} {
+		background-image : url(${svgCircleLinkUrl});
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('next')} > .${qual('btn-icon')} {
 		background-image : url(${svgCircleArrowRightUrl});
 	}`,
 
-	`.${qualName('iv-ctrls')} > a.${qualName('close')} {
+	`.${qual('iv-ctrls')} > .${qual('close')}:hover {
+		background-color : var(--${qual('c-iv-action')});
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('close')} > .${qual('btn-icon')} {
 		background-image : url(${svgCircleArrowUpUrl});
 	}`,
+
+	/* --- thumbnails --- */
 
 	`.thumb {
 		position : relative;
@@ -505,7 +626,7 @@ const getGlobalStyleRules = () => [
 		justify-content : center;
 	}`,
 
-	`.thumb > .${qualName('thumb-overlay')} {
+	`.thumb > .${qual('thumb-overlay')} {
 		display : flex;
 		flex-direction : column;
 		position : absolute;
@@ -515,41 +636,59 @@ const getGlobalStyleRules = () => [
 		right : 0;
 	}`,
 
-	`.thumb > .${qualName('thumb-overlay')} > * {
+	`.thumb > .${qual('thumb-overlay')} > * {
 		display : block;
 		flex-grow : 1;
 	}`,
 
-	`.thumb > .${qualName('thumb-overlay')} > a {
+	`.thumb > .${qual('thumb-overlay')} > a {
 		background-position : center;
 		background-repeat : no-repeat;
 		background-size : 30%;
 		opacity : 0.7;
 	}`,
 
-	`.thumb > .${qualName('thumb-overlay')}
-		> a.${qualName('thumb-ex-link')}:hover
+	`.thumb > .${qual('thumb-overlay')}
+		> a.${qual('thumb-ex-link')}:hover
 	{
 		background-image : url(${svgCircleLinkUrl});
-		background-color : hsl(233, 100%, 75%);
+		background-color : var(--${qual('c-ex-link')});
 	}`,
 
-	`.thumb > .${qualName('thumb-overlay')}
-		> a.${qualName('thumb-in-link')}:hover,
-	.thumb.${qualName('selected')} > .${qualName('thumb-overlay')}
-		> a.${qualName('thumb-in-link')}
+	`.thumb > .${qual('thumb-overlay')}
+		> a.${qual('thumb-in-link')}:hover,
+	.thumb.${qual('selected')} > .${qual('thumb-overlay')}
+		> a.${qual('thumb-in-link')}
 	{
 		background-image : url(${svgCircleArrowDownUrl});
-		background-color : hsl(33, 100%, 75%);
+		background-color : var(--${qual('c-iv-action')});
+	}`,
+
+	/* --- animation --- */
+
+	`.${qual('spinner')} {
+		animation-name : ${qual('spinner')};
+		animation-iteration-count : infinite;
+		animation-duration : 0.36s;
+		animation-timing-function : linear;
+	}`,
+
+	`@keyframes ${qual('spinner')} {
+		from {}
+		to {transform : rotate(1.0turn);}
 	}`,
 ];
 
 /* --- assets --- */
 
-const svgBlobUrl = function(src) {
-	//return `data:image/svg+xml,${encodeURIComponent(src)}`;
+const svgBlobHref = function(src) {
 	return URL.createObjectURL(
 		new Blob([src], {type : `image/svg+xml`}));
+};
+
+const svgEmptyPlaceholder = function(w, h) {
+	return `<svg xmlns='http://www.w3.org/2000/svg' `
+		+`width='${w|0}' height='${h|0}'><path/></svg>`;
 };
 
 const svgCircleArrow = function(rot = 0) {
@@ -560,12 +699,12 @@ const svgCircleArrow = function(rot = 0) {
 				8-16-15-16 15-8-8 24-24z'/>
 	</svg>`;
 };
-const svgCircleArrowUpUrl = svgBlobUrl(svgCircleArrow(0));
-const svgCircleArrowRightUrl = svgBlobUrl(svgCircleArrow(90));
-const svgCircleArrowDownUrl = svgBlobUrl(svgCircleArrow(180));
-const svgCircleArrowLeftUrl = svgBlobUrl(svgCircleArrow(270));
+const svgCircleArrowUpUrl = svgBlobHref(svgCircleArrow(0));
+const svgCircleArrowRightUrl = svgBlobHref(svgCircleArrow(90));
+const svgCircleArrowDownUrl = svgBlobHref(svgCircleArrow(180));
+const svgCircleArrowLeftUrl = svgBlobHref(svgCircleArrow(270));
 
-const svgCircleLink =
+const svgCircleLinkUrl = svgBlobHref(
 	`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'>
 		<path fill='#fff'
 			d='M36 0C16.118 0 0 16.118 0 36s16.118 36 36 36 36-16.118
@@ -581,8 +720,51 @@ const svgCircleLink =
 				0-.41-.066-.798-.184-1.16h5.516c.05.38.078.766.078 1.16 0
 				4.933-4.057 8.99-8.99 8.99H18.365c-4.933
 				0-8.99-4.057-8.99-8.99s4.057-8.988 8.99-8.988z'/>
-	</svg>`;
-const svgCircleLinkUrl = svgBlobUrl(svgCircleLink);
+	</svg>`);
+
+const svgCircleRingUrl = svgBlobHref(
+	`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+		<path fill="#fff" d="M36 0C16.118 0 0 16.118 0 36s16.118 36 36 36
+			36-16.118 36-36S55.882 0 36 0zm0 8.5A27.5 27.5 0 0 1 63.5 36 27.5
+			27.5 0 0 1 36 63.5 27.5 27.5 0 0 1 8.5 36 27.5 27.5 0 0 1 36 8.5zm0
+			5A22.5 22.5 0 0 0 13.5 36 22.5 22.5 0 0 0 36 58.5 22.5 22.5 0 0 0
+			58.5 36 22.5 22.5 0 0 0 36 13.5z"/>
+	</svg>`);
+
+const svgCircleSpinnerUrl = svgBlobHref(
+	`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+		<path fill="#fff" d="M36 0C16.118 0 0 16.118 0 36s16.118 36 36 36
+			36-16.118 36-36S55.882 0 36 0zm0 8.5A27.5 27.5 0 0 1 63.5 36 27.5
+			27.5 0 0 1 36 63.5 27.5 27.5 0 0 1 8.5 36 27.5 27.5 0 0 1 36 8.5zm0
+			5A22.5 22.5 0 0 0 13.5 36 22.5 22.5 0 0 0 36 58.5 22.5 22.5 0 0 0
+			58.5 36 22.5 22.5 0 0 0 36 13.5z"/>
+		<path fill="#fff" opacity=".75" d="M8.5 36a27.5 27.5 0 0 0 8.066
+			19.434L20.1 51.9A22.5 22.5 0 0 1 13.5 36z"/>
+		<path fill="#fff" opacity=".625" d="M20.1 51.9l-3.534 3.534A27.5 27.5 0
+			0 0 36 63.5v-5a22.5 22.5 0 0 1-15.9-6.6z"/>
+		<path fill="#fff" opacity=".125" d="M36 8.5v5a22.5 22.5 0 0 1 15.9
+			6.6l3.534-3.534A27.5 27.5 0 0 0 36 8.5z"/>
+		<path fill="#fff" d="M36 8.5a27.5 27.5 0 0 0-19.434 8.066L20.1 20.1A22.5
+			22.5 0 0 1 36 13.5v-5z"/>
+		<path fill="#fff" opacity=".25" d="M55.434 16.566L51.9 20.1A22.5 22.5 0
+			0 1 58.5 36h5a27.5 27.5 0 0 0-8.066-19.434z"/>
+		<path fill="#fff" opacity=".375" d="M58.5 36a22.5 22.5 0 0 1-6.6
+			15.9l3.534 3.534A27.5 27.5 0 0 0 63.5 36z"/>
+		<path fill="#fff" opacity=".5" d="M51.9 51.9A22.5 22.5 0 0 1 36
+			58.5v5a27.5 27.5 0 0 0 19.434-8.066z"/>
+		<path fill="#fff" opacity=".875" d="M16.566 16.566A27.5 27.5 0 0 0 8.5
+			36h5a22.5 22.5 0 0 1 6.6-15.9z"/>
+
+		<!--animateTransform
+			attributeName="transform"
+			attributeType="XML"
+			type="rotate"
+			from="0 0 0"
+			to="360 0 0"
+			dur="1s"
+			repeatCount="indefinite"/-->
+		<!-- svg animation is too expensive - use css animation instead -->
+	</svg>`);
 
 /* -------------------------------------------------------------------------- */
 
