@@ -12,7 +12,7 @@
 /*
 
 	known issues:
-		- animated gif / video lose playback position when scale-mode changes
+		- animated gif / video loses playback position when scale-mode changes
 
 */
 
@@ -88,6 +88,8 @@ const bindInlineView = async function(state, doc, view) {
 	while (view.hasChildNodes()) {
 		view.removeChild(view.firstChild);};
 
+	enforce(isPostId(state.currentPostId));
+
 	let scaleBtnMode = state.scaleMode === `fit` ? `full` : `fit`;
 
 	let baseHref = doc.location.href;
@@ -95,40 +97,48 @@ const bindInlineView = async function(state, doc, view) {
 	let scaleHref = stateAsFragment(
 		{...state, scaleMode : scaleBtnMode}, baseHref);
 
-	let prevHref = `#`;
-
 	let exHref = postPageUrl(state, state.currentPostId).href;
-
-	let nextHref = `#`;
 
 	let closeHref = stateAsFragment(
 		{...state, currentPostId : undefined}, baseHref);
 
 	view.insertAdjacentHTML(`beforeend`,
 		`<div class='${qual('iv-header')} ${qual('iv-ctrls')}'>
-			<a title='Toogle Size'
+			<a title='Toggle Size'
 				class='${qual('scale')} ${qual(scaleBtnMode)}'
 				href='${escapeAttr(scaleHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
-			<a title='Previous' class='${qual('prev')}'
-				href='${escapeAttr(prevHref)}'>
+
+			<a title='Next' class='${qual('next')}' href='#'>
 				<figure class='${qual('btn-icon')}'></figure></a>
+
 			<a title='#${state.currentPostId}' class='${qual('ex')}'
 				href='${escapeAttr(exHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
-			<a title='Next' class='${qual('next')}'
-				href='${escapeAttr(nextHref)}'>
+
+			<a title='Previous' class='${qual('prev')}' href='#'>
 				<figure class='${qual('btn-icon')}'></figure></a>
+
 			<a title='Close' class='${qual('close')}'
 				href='${escapeAttr(closeHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 		</div>
 		<div class='${qual('iv-content-panel')}'>
 			<div class='${qual('iv-content-stack')}'>
-				<img class='${qual('iv-image')}' id='image' src=''></img>
-				<img class='${qual('iv-image-sample')}' src=''></img>
-				<img class='${qual('iv-image-thumbnail')}' src=''></img>
-				<img class='${qual('iv-image-placeholder')}' src=''></img>
+				<img class='${qual('iv-media')} ${qual('iv-image')}'
+					src='' hidden=''></img>
+
+				<video class='${qual('iv-media')} ${qual('iv-video')}'
+					src='' hidden='' controls='' loop=''></video>
+
+				<img class='${qual('iv-media-sample')}'
+					src='' hidden=''></img>
+
+				<img class='${qual('iv-media-thumbnail')}'
+					src='' hidden=''></img>
+
+				<img class='${qual('iv-media-placeholder')}'
+					src=''></img>
 			</div>
 		</div>
 		<div class='${qual('iv-footer')}'>
@@ -139,13 +149,17 @@ const bindInlineView = async function(state, doc, view) {
 		qual(`iv-content-stack`))[0]);
 
 	let imgElem = enforce(view.getElementsByClassName(qual(`iv-image`))[0]);
+
+	let vidElem = enforce(view.getElementsByClassName(qual(`iv-video`))[0]);
+
 	let sampleElem = enforce(view.getElementsByClassName(
-		qual(`iv-image-sample`))[0]);
+		qual(`iv-media-sample`))[0]);
+
 	let thumbnailElem = enforce(view.getElementsByClassName(
-		qual(`iv-image-thumbnail`))[0]);
+		qual(`iv-media-thumbnail`))[0]);
 
 	let phldrElem = enforce(view.getElementsByClassName(
-		qual(`iv-image-placeholder`))[0]);
+		qual(`iv-media-placeholder`))[0]);
 
 	let info = await tryGetPostInfo(state, state.currentPostId);
 	if (info !== null) {
@@ -169,28 +183,116 @@ const bindInlineView = async function(state, doc, view) {
 
 		if (info.thumbnailHref) {
 			thumbnailElem.src = info.thumbnailHref;
+			thumbnailElem.hidden = false;};
+
+		if (info.type === `video`) {
+			vidElem.src = info.imageHref;
+			vidElem.hidden = false;
+
 		} else {
-			thumbnailElem.hidden = true;};
+			if (info.sampleHref) {
+				sampleElem.src = info.sampleHref;
+				sampleElem.hidden = false;};
 
-		if (info.sampleHref) {
-			sampleElem.src = info.sampleHref;
-		} else {
-			sampleElem.hidden = true;};
+			/* hide the resampled versions when the full image loads: */
+			imgElem.addEventListener(`load`, ev => {
+				thumbnailElem.hidden = true;
+				sampleElem.hidden = true;
+			});
 
-		/* hide the resampled versions when the full image loads: */
-		imgElem.addEventListener(`load`, ev => {
-			thumbnailElem.hidden = true;
-			sampleElem.hidden = true;
-		});
-
-		imgElem.src = info.imageHref;
+			imgElem.src = info.imageHref;
+			imgElem.hidden = false;
+		};
 	};
+
+	let prevBtn = enforce(view.getElementsByClassName(qual(`prev`))[0]);
+	let nextBtn = enforce(view.getElementsByClassName(qual(`next`))[0]);
+
+	if (searchQueryContainsOrderTerm(state, state.searchQuery)) {
+		/* navigation cannot work when using non-default sort order */
+		prevBtn.classList.add(qual(`disabled`));
+		nextBtn.classList.add(qual(`disabled`));
+	} else {
+		bindNavigationButton(state, doc, prevBtn, `prev`);
+		bindNavigationButton(state, doc, nextBtn, `next`);
+	};
+
+	let closeBtn = enforce(view.getElementsByClassName(qual(`close`))[0]);
+	/* when closing, return to the corresponding thumbnail: */
+	closeBtn.addEventListener(`click`, () => {
+		let thumb = doc.getElementById(`s${state.currentPostId}`);
+		if (thumb !== null) {
+			maybeScrollIntoView(doc.defaultView, thumb);};
+	}, false);
+};
+
+const bindNavigationButton = function(state, doc, btn, direction) {
+	enforce(btn instanceof HTMLAnchorElement);
+	enforce(direction === `prev` || direction === `next`);
+
+	primeNavigationButton(state, doc, btn, direction);
+
+	let onClick = ev => {
+		if (!btn.classList.contains(qual(`ready`))) {
+			primeNavigationButton(state, doc, btn, direction);
+			if (ev) {
+				ev.preventDefault();
+				ev.stopPropagation();};
+		};
+	};
+
+	btn.addEventListener(`click`, onClick, false);
+
+	let onKeyDown = ev => {
+		if (!btn.isConnected || btn.ownerDocument !== doc) {
+			doc.removeEventListener(`keydown`, onKeyDown, false);
+			return;};
+
+		/* descending left-to-right order: */
+		if (direction === `prev`) {
+			if (ev.key === `ArrowRight` || ev.key === `Right`) {
+				btn.click();};
+		} else {
+			if (ev.key === `ArrowLeft` || ev.key === `Left`) {
+				btn.click();};
+		};
+	};
+
+	doc.addEventListener(`keydown`, onKeyDown, false);
+};
+
+const primeNavigationButton = async function(state, doc, btn, direction) {
+	enforce(btn instanceof HTMLAnchorElement);
+	enforce(direction === `prev` || direction === `next`);
+	enforce(isPostId(state.currentPostId));
+
+	if (btn.classList.contains(qual(`pending`))
+		|| btn.classList.contains(qual(`ready`)))
+	{
+		return;};
+
+	btn.classList.add(qual(`pending`));
+
+	let info;
+	try {
+		info = await tryNavigatePostInfo(
+			state, state.currentPostId, direction, state.searchQuery);
+	} finally {
+		btn.classList.remove(qual(`pending`));};
+
+	if (info === null) {
+		return;};
+
+	btn.href = stateAsFragment(
+		{...state, currentPostId : info.postId},
+		doc.location.href);
+
+	btn.classList.add(qual(`ready`));
 };
 
 const bindThumbnailsList = function(state, doc, thumbsParent) {
 	for (let thumb of thumbsParent.children) {
-		bindThumbnail(state, doc, thumb);
-	};
+		bindThumbnail(state, doc, thumb);};
 };
 
 const bindThumbnail = function(state, doc, thumb) {
@@ -208,7 +310,11 @@ const bindThumbnail = function(state, doc, thumb) {
 			qual('thumb-in-link'))[0]);
 
 		inLink.href = stateAsFragment(
-			{...state, currentPostId : postId},
+			{...state,
+				currentPostId : (
+					state.currentPostId === postId
+						? undefined
+						: postId)},
 			doc.location.href);
 	};
 };
@@ -379,11 +485,20 @@ const stateFromUrl = function(url) {
 		/* unknown site */
 		return null;};
 
+	let searchQuery = url.searchParams.get(`tags`);
+	if (searchQuery !== undefined) {
+		if (!/\S/.test(searchQuery)) {
+			/* contains only whitespace characters */
+			searchQuery = undefined;
+		};
+	};
+
 	return {
 		currentPostId : postIdFromUrl(null, url),
+		scaleMode : `fit`,
 		...stateFromFragment(url.hash),
 		domain,
-		searchQuery : url.searchParams.get(`tags`),};
+		searchQuery,};
 };
 
 const fragmentPrefix = `#`+namespace+`:`;
@@ -402,6 +517,23 @@ const stateFromFragment = function(frag) {
 		return null;};
 
 	return state;
+};
+
+const searchQueryContainsOrderTerm = function(state, searchQuery) {
+	/* navigation cannot work when using non-default sort order */
+
+	if (typeof searchQuery === `string`) {
+		for (let s of searchQuery.split(/\s/)) {
+			if (s.length === 0) {
+				continue;};
+
+			s = s.toLowerCase();
+			if (s.startsWith(`sort:`)) {
+				return true;};
+		};
+	};
+
+	return false;
 };
 
 /* --- post info --- */
@@ -426,7 +558,7 @@ const tryGetPostInfo = async function(state, postId) {
 	if (!(xml instanceof Document)) {
 		return null;};
 
-	info = singlePostInfoFromGelbooruPostsElem(state, xml.documentElement);
+	info = singlePostInfoFromGelbooruApiPostsElem(state, xml.documentElement);
 
 	if (info === null || info.postId !== postId) {
 		return null;};
@@ -442,11 +574,20 @@ const tryNavigatePostInfo = async function(
 	enforce(isPostId(postId));
 	enforce(direction === `prev` || direction === `next`);
 
-	// todo
-	throw `todo`;
+	let resp = await tryHttpGet(
+		requestNavigatePostInfoUrl(state, postId, direction, searchQuery));
+
+	if (typeof resp !== `object`) {
+		return null;};
+
+	let xml = resp.responseXML;
+	if (!(xml instanceof Document)) {
+		return null;};
+
+	return singlePostInfoFromGelbooruApiPostsElem(state, xml.documentElement);
 };
 
-const singlePostInfoFromGelbooruPostsElem = function(state, postsElem) {
+const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 	if (!(postsElem instanceof Element)
 		|| postsElem.tagName !== `posts`
 		|| postsElem.children.length !== 1)
@@ -483,8 +624,19 @@ const singlePostInfoFromGelbooruPostsElem = function(state, postsElem) {
 		};
 	};
 
+	let type = `image`;
+	{
+		let url = tryParseHref(imageHref);
+		if (url !== null) {
+			let p = url.pathname.toLowerCase();
+			if (p.endsWith(`.webm`) || p.endsWith(`.mp4`)) {
+				type = `video`;};
+		};
+	};
+
 	return {
 		postId,
+		type,
 		imageHref,
 		sampleHref,
 		thumbnailHref,
@@ -500,6 +652,28 @@ const requestPostInfoByIdUrl = function(state, postId) {
 	let url = new URL(
 		`https://rule34.xxx/?page=dapi&s=post&q=index&limit=1`);
 	url.searchParams.set(`tags`, `id:${postId}`);
+	return url;
+};
+
+const requestNavigatePostInfoUrl = function(
+	state, postId, direction, searchQuery)
+{
+	enforce(isPostId(postId));
+	enforce(direction === `prev` || direction === `next`);
+
+	let url = new URL(
+		`https://rule34.xxx/?page=dapi&s=post&q=index&limit=1`);
+
+	let q =
+		direction === `prev`
+			? `id:<${postId} sort:id:desc`
+			: `id:>${postId} sort:id:asc`;
+
+	if (typeof searchQuery === `string` && searchQuery.length !== 0) {
+		q += ` `+searchQuery;};
+
+	url.searchParams.set(`tags`, q);
+
 	return url;
 };
 
@@ -652,6 +826,7 @@ const getGlobalStyleRules = () => [
 		flex-direction : column;
 		align-items : center;
 		justify-content : flex-start;
+		min-height : calc(20rem + 50vh);
 	}`,
 
 	`.${qual('iv-content-panel')} {
@@ -663,6 +838,8 @@ const getGlobalStyleRules = () => [
 
 	`.${qual('iv-content-stack')} {
 		display : grid;
+		justify-items : center;
+		align-items : center;
 	}`,
 
 	`.${qual('iv-content-stack')} > * {
@@ -675,24 +852,24 @@ const getGlobalStyleRules = () => [
 		max-height : 100vh;
 	}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-image')} {
+	`.${qual('iv-content-stack')} > .${qual('iv-media')} {
 		z-index : 2;
 	}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-image-sample')} {
+	`.${qual('iv-content-stack')} > .${qual('iv-media-sample')} {
 		z-index : 1;
 	}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-image-thumbnail')} {
+	`.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')} {
 		z-index : 0;
 		opacity : 0.5;
 	}`,
 
-
-	`.${qual('iv-content-stack')} > .${qual('iv-image-sample')},
-	.${qual('iv-content-stack')} > .${qual('iv-image-thumbnail')}
+	`.${qual('iv-content-stack')} > .${qual('iv-media-sample')},
+	.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')}
 	{
-		width : 100%;
+		width : auto;
+		height : 100%;
 	}`,
 
 	`.${qual('iv-header')}, .${qual('iv-footer')} {
@@ -736,6 +913,7 @@ const getGlobalStyleRules = () => [
 		width : 2rem;
 		height : 2rem;
 		background-size : cover;
+		background-image : url(${svgCircleRingHref});
 	}`,
 
 	`.${qual('iv-ctrls')} > .${qual('scale')}.${qual('full')}
@@ -750,8 +928,10 @@ const getGlobalStyleRules = () => [
 		background-image : url(${svgCircleContractHref});
 	}`,
 
-	`.${qual('iv-ctrls')} > .${qual('prev')} > .${qual('btn-icon')} {
-		background-image : url(${svgCircleArrowLeftHref});
+	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('ready')}
+		> .${qual('btn-icon')}
+	{
+		background-image : url(${svgCircleArrowRightHref});
 	}`,
 
 	`.${qual('iv-ctrls')} > .${qual('ex')}:hover {
@@ -762,8 +942,10 @@ const getGlobalStyleRules = () => [
 		background-image : url(${svgCircleLinkHref});
 	}`,
 
-	`.${qual('iv-ctrls')} > .${qual('next')} > .${qual('btn-icon')} {
-		background-image : url(${svgCircleArrowRightHref});
+	`.${qual('iv-ctrls')} > .${qual('next')}.${qual('ready')}
+		> .${qual('btn-icon')}
+	{
+		background-image : url(${svgCircleArrowLeftHref});
 	}`,
 
 	`.${qual('iv-ctrls')} > .${qual('close')}:hover {
@@ -772,6 +954,23 @@ const getGlobalStyleRules = () => [
 
 	`.${qual('iv-ctrls')} > .${qual('close')} > .${qual('btn-icon')} {
 		background-image : url(${svgCircleArrowUpHref});
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')},
+	.${qual('iv-ctrls')} > .${qual('prev')}.${qual('disabled')},
+	.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')},
+	.${qual('iv-ctrls')} > .${qual('next')}.${qual('disabled')}
+	{
+		pointer-events : none;
+	}`,
+
+	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')}
+		> .${qual('btn-icon')},
+	.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')}
+		> .${qual('btn-icon')}
+	{
+		${spinnerStyleRules}
+		background-image : url(${svgCircleSpinnerHref});
 	}`,
 
 	/* --- thumbnails --- */
@@ -822,20 +1021,25 @@ const getGlobalStyleRules = () => [
 		background-color : var(--${qual('c-iv-action')});
 	}`,
 
-	/* --- animation --- */
-
-	`.${qual('spinner')} {
-		animation-name : ${qual('spinner')};
-		animation-iteration-count : infinite;
-		animation-duration : 0.36s;
-		animation-timing-function : linear;
+	`.thumb.${qual('selected')} > .${qual('thumb-overlay')}
+		> a.${qual('thumb-in-link')}:hover
+	{
+		background-image : url(${svgCircleArrowUpHref});
 	}`,
+
+	/* --- animation --- */
 
 	`@keyframes ${qual('spinner')} {
 		from {}
 		to {transform : rotate(1.0turn);}
 	}`,
 ];
+
+const spinnerStyleRules =
+	`animation-name : ${qual('spinner')};
+	animation-iteration-count : infinite;
+	animation-duration : 0.36s;
+	animation-timing-function : linear;`;
 
 /* --- assets --- */
 
