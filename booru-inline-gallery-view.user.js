@@ -1,8 +1,12 @@
 ﻿// ==UserScript==
 // @name		Booru: Inline Gallery View
 // @namespace	6930e44863619d3f19806f68f74dbf62
-// @match		*://*.rule34.xxx/*
-// @version		2019-04-05
+// @match		*://rule34.xxx/*
+// @match		*://e621.net/*
+// @match		*://danbooru.donmai.us/*
+// @match		*://realbooru.com/*
+// @version		2019-04-09
+// @downloadURL	https://github.com/bipface/userscripts/raw/master/booru-inline-gallery-view.user.js
 // @run-at		document-end
 // @grant		GM_xmlhttpRequest
 // ==/UserScript==
@@ -12,27 +16,66 @@
 /*
 
 	known issues:
+		- doesn't work on gelbooru or yandere, yet
 		- animated gif / video loses playback position when scale-mode changes
+		- controls typically end up off-screen; hinders navigation by clicking
+			(mainly affects mobile browsing)
+		- can't navigate when search query includes sort:* / order:*
+		- won't work with danbooru's zip-player videos
+		- 2-tag search limit on danbooru breaks navigation
+		- loading full-size images may not always be desirable
+			(e.g. mobile browsing with small data allowance)
+		- scale-mode 'full' doesn't seem to work well on rule34's mobile layout
+		- media type badge is misaligned on e621 thumbnails
+		- stateAsFragment() should optimise away redundant fields
 
 */
 
 /* -------------------------------------------------------------------------- */
 
+const dbg = true;
+const unittests = dbg ? [] : null;
+const test =
+	dbg
+		? f => unittests.push(f)
+		: () => {};
+
 const entrypoint = function() {
 	if (!isGalleryUrl(tryParseHref(location.href))) {
 		return;};
+
+	document.addEventListener(`keydown`, onKeyDown, true);
 
 	window.addEventListener(
 		`hashchange`,
 		ev => applyToDocument(ev.target.document, ev.newURL),
 		false);
+
 	applyToDocument(document, location.href);
+};
+
+const onKeyDown = function(ev) {
+	/* global hotkeys: */
+
+	if (ev.key === `ArrowRight` || ev.key === `Right`) {
+		let btn = getSingleElemByClass(ev.target, qual(`prev`));
+		if (btn instanceof HTMLElement) {
+			btn.click();
+			ev.stopPropagation();};
+
+	} else if (ev.key === `ArrowLeft` || ev.key === `Left`) {
+		let btn = getSingleElemByClass(ev.target, qual(`next`));
+		if (btn instanceof HTMLElement) {
+			btn.click();
+			ev.stopPropagation();};
+	};
 };
 
 /* -------------------------------------------------------------------------- */
 
 /*
 	state : {
+		origin : `protocol://hostname:port`,
 		domain : string,
 		searchQuery : string,
 		currentPostId : int,
@@ -42,16 +85,28 @@ const entrypoint = function() {
 
 const namespace = `inline-gallery-view`;
 
-const qual = function(n, ns = namespace) {
-	return ns+`-`+n;
+const qual = function(n) {
+	return namespace+`-`+n;
 };
 
 const hostnameDomainTbl = {
 	[`rule34.xxx`] : `r34xxx`,
-	//[`gelbooru.com`] : `gelbooru`,
-	//[`e621.net`] : `e621`,
-	//[`danbooru.donmai.us`] : `danbooru`,
-	//[`yande.re`] : `yandere`,
+	[`gelbooru.com`] : `gelbooru`,
+	[`e621.net`] : `e621`,
+	[`danbooru.donmai.us`] : `danbooru`,
+	[`yande.re`] : `yandere`,
+	[`safebooru.org`] : `safebooru`,
+	[`realbooru.com`] : `realbooru`,
+};
+
+const domainKindTbl = {
+	e621 : `danbooru`,
+	danbooru : `danbooru`,
+	yandere : `danbooru`,
+	r34xxx : `gelbooru`,
+	gelbooru : `gelbooru`,
+	safebooru : `gelbooru`,
+	realbooru : `gelbooru`,
 };
 
 const applyToDocument = function(doc, href) {
@@ -63,7 +118,7 @@ const applyToDocument = function(doc, href) {
 	let state = stateFromUrl(url);
 	if (state === null) {return;};
 
-	ensureApplyStyleRules(doc, getGlobalStyleRules);
+	ensureApplyStyleRules(doc, () => getGlobalStyleRules(state.domain));
 
 	let viewParent = getInlineViewParent(state, doc);
 	let view = getInlineView(state, viewParent);
@@ -85,10 +140,10 @@ const applyToDocument = function(doc, href) {
 };
 
 const bindInlineView = async function(state, doc, view) {
+	dbg && assert(isPostId(state.currentPostId));
+
 	while (view.hasChildNodes()) {
 		view.removeChild(view.firstChild);};
-
-	enforce(isPostId(state.currentPostId));
 
 	let scaleBtnMode = state.scaleMode === `fit` ? `full` : `fit`;
 
@@ -126,40 +181,37 @@ const bindInlineView = async function(state, doc, view) {
 		<div class='${qual('iv-content-panel')}'>
 			<div class='${qual('iv-content-stack')}'>
 				<img class='${qual('iv-media')} ${qual('iv-image')}'
-					src='' hidden=''></img>
+					hidden=''></img>
 
 				<video class='${qual('iv-media')} ${qual('iv-video')}'
-					src='' hidden='' controls='' loop=''></video>
+					hidden='' controls='' loop=''></video>
 
-				<img class='${qual('iv-media-sample')}'
-					src='' hidden=''></img>
+				<img class='${qual('iv-media-sample')}' hidden=''></img>
 
-				<img class='${qual('iv-media-thumbnail')}'
-					src='' hidden=''></img>
+				<img class='${qual('iv-media-thumbnail')}' hidden=''></img>
 
-				<img class='${qual('iv-media-placeholder')}'
-					src=''></img>
+				<img class='${qual('iv-media-placeholder')}'></img>
 			</div>
 		</div>
 		<div class='${qual('iv-footer')}'>
 			<!-- -->
 		</div>`);
 
-	let stackElem = enforce(view.getElementsByClassName(
-		qual(`iv-content-stack`))[0]);
+	let stackElem = enforce(getSingleElemByClass(
+		view, qual(`iv-content-stack`)));
 
-	let imgElem = enforce(view.getElementsByClassName(qual(`iv-image`))[0]);
+	let imgElem = enforce(getSingleElemByClass(view, qual(`iv-image`)));
 
-	let vidElem = enforce(view.getElementsByClassName(qual(`iv-video`))[0]);
+	let vidElem = enforce(getSingleElemByClass(view, qual(`iv-video`)));
 
-	let sampleElem = enforce(view.getElementsByClassName(
-		qual(`iv-media-sample`))[0]);
+	let sampleElem = enforce(getSingleElemByClass(
+		view, qual(`iv-media-sample`)));
 
-	let thumbnailElem = enforce(view.getElementsByClassName(
-		qual(`iv-media-thumbnail`))[0]);
+	let thumbnailElem = enforce(getSingleElemByClass(
+		view, qual(`iv-media-thumbnail`)));
 
-	let phldrElem = enforce(view.getElementsByClassName(
-		qual(`iv-media-placeholder`))[0]);
+	let phldrElem = enforce(getSingleElemByClass(
+		view, qual(`iv-media-placeholder`)));
 
 	let info = await tryGetPostInfo(state, state.currentPostId);
 	if (info !== null) {
@@ -192,12 +244,15 @@ const bindInlineView = async function(state, doc, view) {
 		} else {
 			if (info.sampleHref) {
 				sampleElem.src = info.sampleHref;
-				sampleElem.hidden = false;};
+				sampleElem.hidden = false;
+			};
 
 			/* hide the resampled versions when the full image loads: */
 			imgElem.addEventListener(`load`, ev => {
 				thumbnailElem.hidden = true;
+				thumbnailElem.src = ``;
 				sampleElem.hidden = true;
+				sampleElem.src = ``;
 			});
 
 			imgElem.src = info.imageHref;
@@ -205,8 +260,8 @@ const bindInlineView = async function(state, doc, view) {
 		};
 	};
 
-	let prevBtn = enforce(view.getElementsByClassName(qual(`prev`))[0]);
-	let nextBtn = enforce(view.getElementsByClassName(qual(`next`))[0]);
+	let prevBtn = enforce(getSingleElemByClass(view, qual(`prev`)));
+	let nextBtn = enforce(getSingleElemByClass(view, qual(`next`)));
 
 	if (searchQueryContainsOrderTerm(state, state.searchQuery)) {
 		/* navigation cannot work when using non-default sort order */
@@ -217,13 +272,17 @@ const bindInlineView = async function(state, doc, view) {
 		bindNavigationButton(state, doc, nextBtn, `next`);
 	};
 
-	let closeBtn = enforce(view.getElementsByClassName(qual(`close`))[0]);
+	let closeBtn = enforce(getSingleElemByClass(view, qual(`close`)));
 	/* when closing, return to the corresponding thumbnail: */
-	closeBtn.addEventListener(`click`, () => {
-		let thumb = doc.getElementById(`s${state.currentPostId}`);
-		if (thumb !== null) {
-			maybeScrollIntoView(doc.defaultView, thumb);};
-	}, false);
+	closeBtn.addEventListener(`click`, () =>
+		onCloseInlineView(state, doc), false);
+};
+
+const onCloseInlineView = function(state, doc) {
+	maybeScrollIntoView(doc.defaultView,
+		doc.getElementById(`post_${state.currentPostId}`) /* danbooru */
+		|| doc.getElementById(`p${state.currentPostId}`) /* others */,
+		`instant` /* smooth scroll can fail due to changing page height */);
 };
 
 const bindNavigationButton = function(state, doc, btn, direction) {
@@ -242,23 +301,6 @@ const bindNavigationButton = function(state, doc, btn, direction) {
 	};
 
 	btn.addEventListener(`click`, onClick, false);
-
-	let onKeyDown = ev => {
-		if (!btn.isConnected || btn.ownerDocument !== doc) {
-			doc.removeEventListener(`keydown`, onKeyDown, false);
-			return;};
-
-		/* descending left-to-right order: */
-		if (direction === `prev`) {
-			if (ev.key === `ArrowRight` || ev.key === `Right`) {
-				btn.click();};
-		} else {
-			if (ev.key === `ArrowLeft` || ev.key === `Left`) {
-				btn.click();};
-		};
-	};
-
-	doc.addEventListener(`keydown`, onKeyDown, false);
 };
 
 const primeNavigationButton = async function(state, doc, btn, direction) {
@@ -296,25 +338,23 @@ const bindThumbnailsList = function(state, doc, thumbsParent) {
 };
 
 const bindThumbnail = function(state, doc, thumb) {
-	let extUrl = thumbnailUrl(state, thumb);
-	let postId = postIdFromUrl(state, extUrl);
-	if (!isPostId(postId)) {
+	let info = thumbnailInfo(state, thumb);
+	if (info === null) {
 		return null;};
 
 	thumb.classList.toggle(qual(`selected`),
-		postId === state.currentPostId);
+		info.postId === state.currentPostId);
 
-	let ovr = ensureThumbnailOverlay(state, doc, thumb, extUrl);
+	let ovr = ensureThumbnailOverlay(state, doc, thumb, info.url);
 	if (ovr !== null) {
-		let inLink = enforce(ovr.getElementsByClassName(
-			qual('thumb-in-link'))[0]);
+		let inLink = enforce(getSingleElemByClass(ovr, qual('thumb-in-link')));
 
 		inLink.href = stateAsFragment(
 			{...state,
 				currentPostId : (
-					state.currentPostId === postId
+					state.currentPostId === info.postId
 						? undefined
-						: postId)},
+						: info.postId)},
 			doc.location.href);
 	};
 };
@@ -322,16 +362,11 @@ const bindThumbnail = function(state, doc, thumb) {
 const ensureThumbnailOverlay = function(state, doc, thumb, extUrl) {
 	enforce(thumb instanceof HTMLElement);
 
-	{
-		let xs = thumb.getElementsByClassName(qual(`thumb-overlay`));
-		if (xs.length > 1) {
-			return null;};
-	
-		if (xs.length === 1) {
-			return xs[0];};
-	};
+	let ovr = getSingleElemByClass(thumb, qual(`thumb-overlay`));
+	if (ovr !== null) {
+		return ovr;};
 
-	let ovr = doc.createElement(`div`);
+	ovr = doc.createElement(`div`);
 	ovr.classList.add(qual(`thumb-overlay`));
 
 	let title = thumbnailTitle(state, thumb);
@@ -349,178 +384,100 @@ const ensureThumbnailOverlay = function(state, doc, thumb, extUrl) {
 };
 
 const ensureInlineView = function(state, doc, parentElem) {
-	let containerElem = getInlineView(state, parentElem);
+	let ivPanel = getInlineView(state, parentElem);
 
-	if (parentElem && containerElem === null) {
-		containerElem = doc.createElement(`div`);
-		containerElem.classList.add(qual(`iv-panel`));
-		parentElem.append(containerElem);
+	if (parentElem !== null && ivPanel === null) {
+		ivPanel = doc.createElement(`div`);
+		ivPanel.classList.add(qual(`iv-panel`));
+		parentElem.append(ivPanel);
 	};
 
-	return containerElem;
+	return ivPanel;
 };
 
 const getInlineView = function(state, parentElem) {
-	let containerElem = null;
-	if (parentElem) {
-		let xs = parentElem.getElementsByClassName(qual(`iv-panel`));
-		if (xs.length > 1) {
-			return null;};
-		if (xs.length === 1) {
-			containerElem = xs[0];};
-	};
+	let ivPanel = null;
+	if (parentElem instanceof Element) {
+		ivPanel = getSingleElemByClass(parentElem, qual(`iv-panel`));};
 
-	if (!(containerElem instanceof HTMLDivElement)) {
+	if (!(ivPanel instanceof HTMLDivElement)) {
 		return null;};
 
-	return containerElem;
+	return ivPanel;
 };
 
 const getInlineViewParent = function(state, doc) {
-	let parentElem = null;
-	{
-		let xs = doc.getElementsByClassName(`content`);
-		if (xs.length !== 1) {
-			return null;};
-		parentElem = xs[0];
-	};
-
-	return parentElem;
+	return getSingleElemByClass(doc, `content-post`) /* gelbooru */
+		|| getSingleElemByClass(doc, `content`) /* e621 */
+		|| doc.getElementById(`content`) /* danbooru */;
 };
 
 const getThumbnailsParent = function(state, doc) {
 	let outerElem = getInlineViewParent(state, doc);
-	if (!outerElem) {
+	if (outerElem === null) {
 		return null;};
 
-	let firstThumb = outerElem.getElementsByClassName(`thumb`)[0];
-	if (!firstThumb) {
+	let firstThumb = outerElem.getElementsByClassName(
+		getThumbClass(state)).item(0);
+	if (firstThumb === null) {
 		return null;};
 
 	return firstThumb.parentElement;
 };
 
-const thumbnailUrl = function(state, elem) {
+const thumbnailInfo = function(state, elem) {
 	enforce(elem instanceof HTMLElement);
 
-	let url = null;
+	let info = null;
 	for (let c of elem.children) {
 		if (!(c instanceof HTMLAnchorElement)) {
 			continue;}
 
-		let cu = tryParseHref(c.href);
-		if (cu === null || !isPostUrl(state, cu)) {
+		let url = tryParseHref(c.href);
+		if (url === null) {
 			continue;};
 
-		if (url !== null) {
+		let postId = postIdFromUrl(state, url);
+		if (!isPostId(postId)) {
+			continue;};
+
+		if (info !== null) {
 			/* thumbnail has multiple <a> children */
 			return null;};
 
-		url = cu;
+		info = {postId, url};
 	};
 
-	return url;
+	return info;
 };
 
 const thumbnailTitle = function(state, elem) {
 	enforce(elem instanceof HTMLElement);
 
-	let xs = elem.getElementsByClassName(`preview`);
-	if (xs.length !== 1) {
+	let xs = getSingleElemByClass(elem, `preview`);
+	if (xs === null) {
 		return ``;};
 
-	let title = xs[0].title;
-	if (typeof title !== `string`) {
-		return ``;};
-
-	return title.trim();
+	return xs.title.trim();
 };
 
 const isPostId = function(id) {
 	return (id|0) === id && id >= 0;
 };
 
-const isGalleryUrl = function(url) {
-	if (!(url instanceof URL)) {
-		return false;};
-
-	/* currently only rule34 search-result pages are supported: */
-
-	return (
-		[`/`, `/index.php`].includes(url.pathname)
-			&& url.searchParams.get(`page`) === `post`
-			&& url.searchParams.get(`s`) === `list`);
-};
-
-const isPostUrl = function(state, url) {
-	if (!(url instanceof URL)) {
-		return false;};
-
-	/* currently only rule34 post pages are supported: */
-
-	return (
-		[`/`, `/index.php`].includes(url.pathname)
-			&& url.searchParams.get(`page`) === `post`
-			&& url.searchParams.get(`s`) === `view`
-			&& isPostId(postIdFromUrl(state, url)));
-};
-
-const postIdFromUrl = function(state, url) {
-	if (!(url instanceof URL)) {
-		return -1;};
-
-	let id = parseInt(url.searchParams.get(`id`));
-	if (!isPostId(id)) {
-		return -1;};
-
-	return id;
-};
-
-const stateFromUrl = function(url) {
-	if (!(url instanceof URL)) {
-		return null;};
-
-	let domain = hostnameDomainTbl[url.hostname];
-	if (domain === undefined) {
-		/* unknown site */
-		return null;};
-
-	let searchQuery = url.searchParams.get(`tags`);
-	if (searchQuery !== undefined) {
-		if (!/\S/.test(searchQuery)) {
-			/* contains only whitespace characters */
-			searchQuery = undefined;
-		};
-	};
-
-	return {
-		currentPostId : postIdFromUrl(null, url),
-		scaleMode : `fit`,
-		...stateFromFragment(url.hash),
-		domain,
-		searchQuery,};
-};
-
-const fragmentPrefix = `#`+namespace+`:`;
-
-const stateAsFragment = function(state, baseHref) {
-	return fragmentPrefix+encodeURIComponent(JSON.stringify(state));
-};
-
-const stateFromFragment = function(frag) {
-	if (typeof frag !== `string` || !frag.startsWith(fragmentPrefix)) {
-		return null;};
-
-	let src = frag.slice(fragmentPrefix.length);
-	let state = tryParseJson(decodeURIComponent(src));
-	if (typeof state !== `object`) {
-		return null;};
-
-	return state;
+const domainKindOrderTermPrefixTbl = {
+	danbooru : `order:`,
+	gelbooru : `sort:`,
 };
 
 const searchQueryContainsOrderTerm = function(state, searchQuery) {
 	/* navigation cannot work when using non-default sort order */
+	if (searchQuery === undefined) {
+		return false;};
+
+	let orderPrefix = domainKindOrderTermPrefixTbl[getDomainKind(state)];
+	if (orderPrefix === undefined) {
+		return false;};
 
 	if (typeof searchQuery === `string`) {
 		for (let s of searchQuery.split(/\s/)) {
@@ -528,7 +485,7 @@ const searchQueryContainsOrderTerm = function(state, searchQuery) {
 				continue;};
 
 			s = s.toLowerCase();
-			if (s.startsWith(`sort:`)) {
+			if (s.startsWith(orderPrefix)) {
 				return true;};
 		};
 	};
@@ -536,7 +493,28 @@ const searchQueryContainsOrderTerm = function(state, searchQuery) {
 	return false;
 };
 
+const getDomainKind = function({domain}) {
+	enforce(typeof domain === `string`);
+	let k = domainKindTbl[domain];
+	enforce(typeof k === `string`);
+	return k;
+};
+
+const getThumbClass = function({domain}) {
+	enforce(typeof domain === `string`);
+	return domain === `danbooru`
+		? `post-preview`
+		: `thumb`;
+};
+
 /* --- post info --- */
+
+/*
+
+	note: post info is retained indefinitely, so it should only store
+	immutable attributes (file type, dimensions, etc.).
+
+*/
 
 const postInfoTbl = new Map(); /* postId → postInfo */
 
@@ -544,21 +522,36 @@ const tryGetPostInfo = async function(state, postId) {
 	enforce(isPostId(postId));
 
 	let info = postInfoTbl.get(postId);
-	if (info) {
-		enforce(typeof info === `object`);
+	if (info !== undefined) {
+		dbg && assert(typeof info === `object`);
 		return info;};
+
+	info = null;
 
 	let resp = await tryHttpGet(
 		requestPostInfoByIdUrl(state, postId));
-
-	if (typeof resp !== `object`) {
+	if (resp === null) {
 		return null;};
 
-	let xml = resp.responseXML;
-	if (!(xml instanceof Document)) {
-		return null;};
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			let respObj = tryParseJson(resp.responseText);
+			if (typeof respObj !== `object`) {
+				return null;};
 
-	info = singlePostInfoFromGelbooruApiPostsElem(state, xml.documentElement);
+			info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+			break;
+
+		case `gelbooru` :
+			let xml = resp.responseXML;
+			if (!(xml instanceof Document)) {
+				return null;};
+
+			info = singlePostInfoFromGelbooruApiPostsElem(
+				state, xml.documentElement);
+			break;
+	};
+
 
 	if (info === null || info.postId !== postId) {
 		return null;};
@@ -568,23 +561,95 @@ const tryGetPostInfo = async function(state, postId) {
 	return info;
 };
 
+const apiRequPostIdCache = new Map(); /* href → postId */
+
+const apiRequPostIdCacheExpireMs = 30000;
+
 const tryNavigatePostInfo = async function(
-	state, postId, direction, searchQuery)
+	state, fromPostId, direction, searchQuery)
 {
-	enforce(isPostId(postId));
+	enforce(isPostId(fromPostId));
 	enforce(direction === `prev` || direction === `next`);
 
-	let resp = await tryHttpGet(
-		requestNavigatePostInfoUrl(state, postId, direction, searchQuery));
-
-	if (typeof resp !== `object`) {
+	let requUrl = requestNavigatePostInfoUrl(
+		state, fromPostId, direction, searchQuery);
+	if (requUrl === null) {
 		return null;};
 
-	let xml = resp.responseXML;
-	if (!(xml instanceof Document)) {
+	let cacheKey = requUrl.href;
+	let postId = apiRequPostIdCache.get(cacheKey);
+	if (isPostId(postId)) {
+		let info = postInfoTbl.get(postId);
+		if (info !== undefined) {
+			dbg && assert(typeof info === `object`);
+			return info;};
+	};
+
+	let resp = await tryHttpGet(requUrl);
+	if (resp === null) {
 		return null;};
 
-	return singlePostInfoFromGelbooruApiPostsElem(state, xml.documentElement);
+	let info = null;
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			let respObj = tryParseJson(resp.responseText);
+			if (typeof respObj !== `object`) {
+				return null;};
+			info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+			break;
+
+		case `gelbooru` :
+			let xml = resp.responseXML;
+			if (!(xml instanceof Document)) {
+				return null;};
+			info = singlePostInfoFromGelbooruApiPostsElem(
+				state, xml.documentElement);
+			break;
+	};
+
+	if (info === null) {
+		return null;};
+	dbg && assert(isPostId(info.postId));
+
+	postInfoTbl.set(info.postId, info);
+
+	apiRequPostIdCache.set(cacheKey, info.postId);
+	setTimeout(
+		() => apiRequPostIdCache.delete(cacheKey),
+		apiRequPostIdCacheExpireMs);
+
+	return info;
+};
+
+const singlePostInfoFromDanbooruApiPostsList = function(state, posts) {
+	if (!Array.isArray(posts) || posts.length !== 1) {
+		return null;};
+
+	let post = posts[0];
+	if (typeof post !== `object` || post === null) {
+		return null;};
+
+	if (!isPostId(post.id)) {
+		return null;};
+
+	let imageHref = post.file_url;
+
+	let sampleHref = post.large_file_url || post.sample_url;
+	if (sampleHref === imageHref) {
+		sampleHref = undefined;};
+
+	let thumbnailHref = post.preview_file_url || post.preview_url;
+	if (thumbnailHref === imageHref) {
+		thumbnailHref = undefined;};
+
+	return {
+		postId : post.id,
+		type : getMediaType(imageHref),
+		imageHref,
+		sampleHref,
+		thumbnailHref,
+		width : (post.image_width || post.width)|0,
+		height : (post.image_height || post.height)|0,};
 };
 
 const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
@@ -600,7 +665,7 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 	{
 		return null;};
 
-	let postId = parseInt(post.getAttribute(`id`));
+	let postId = tryParsePostId(post.getAttribute(`id`));
 	if (!isPostId(postId)) {
 		return null;};
 
@@ -624,19 +689,9 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 		};
 	};
 
-	let type = `image`;
-	{
-		let url = tryParseHref(imageHref);
-		if (url !== null) {
-			let p = url.pathname.toLowerCase();
-			if (p.endsWith(`.webm`) || p.endsWith(`.mp4`)) {
-				type = `video`;};
-		};
-	};
-
 	return {
 		postId,
-		type,
+		type : getMediaType(imageHref),
 		imageHref,
 		sampleHref,
 		thumbnailHref,
@@ -644,81 +699,371 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 		height : post.getAttribute(`height`)|0,};
 };
 
+const getMediaType = function(href) {
+	let type = `image`;
+
+	let url = tryParseHref(href);
+	if (url !== null) {
+		let p = url.pathname.toLowerCase();
+		if (p.endsWith(`.webm`) || p.endsWith(`.mp4`)) {
+			type = `video`;
+		} else if (p.endsWith(`.swf`)) {
+			type = `flash`;
+		};
+	};
+
+	return type;
+};
+
 /* --- urls --- */
 
-const requestPostInfoByIdUrl = function(state, postId) {
-	enforce(isPostId(postId));
+const fragmentPrefix = `#`+namespace+`:`;
 
-	let url = new URL(
-		`https://rule34.xxx/?page=dapi&s=post&q=index&limit=1`);
-	url.searchParams.set(`tags`, `id:${postId}`);
-	return url;
+const stateAsFragment = function(state, baseHref) {
+	return fragmentPrefix+encodeURIComponent(JSON.stringify(state));
+};
+
+const stateFromFragment = function(frag) {
+	if (typeof frag !== `string` || !frag.startsWith(fragmentPrefix)) {
+		return null;};
+
+	let src = frag.slice(fragmentPrefix.length);
+	let state = tryParseJson(decodeURIComponent(src));
+	if (typeof state !== `object`) {
+		return null;};
+
+	return state;
+};
+
+const stateFromUrl = function(url) {
+	if (!(url instanceof URL)) {
+		return null;};
+
+	let domain = hostnameDomainTbl[url.hostname];
+	if (domain === undefined) {
+		/* unknown site */
+		return null;};
+
+	return {
+		currentPostId : postIdFromUrl({domain}, url),
+		scaleMode : `fit`,
+		...stateFromFragment(url.hash),
+		origin : url.origin,
+		domain,
+		searchQuery : searchQueryFromUrl({domain}, url),};
+};
+
+test(_ => {
+	/* e621 search queries */
+
+	let url = new URL(`https://e621.net`);
+	for (let [path, queryString, expect] of [
+		[`/post`, ``, undefined],
+		[`/post/`, ``, undefined],
+		[`/post/index`, ``, undefined],
+		[`/post/index/`, ``, undefined],
+		[`/post/index/1`, ``, undefined],
+		[`/post/index/1/`, ``, undefined],
+		[`/post/index/1/id:<1837141 order:id`, ``, `id:<1837141 order:id`],
+		[`/post/index/1/id:<1837141 order:id/`, ``, `id:<1837141 order:id`],
+		[`/post/index/1/id:<1837141 order:id//`, ``, undefined],
+		[`/post/index/1/id:<1837141 order:id/asdf`, ``, undefined],
+		[`/post/index//id:<1837141 order:id`, ``, undefined],
+		[`/post/index/1//id:<1837141 order:id`, ``, undefined],
+		[`/post/index/asdf/id:<1837141 order:id`, ``, undefined],
+		[`/post`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/post/`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/post/index`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/post/index/`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/post/index/1`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/post/index/1/`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		/* path takes precedence over querystring: */
+		[`/post/index/1/absurdres`, `tags=id:<1837141 order:id`, `absurdres`],])
+	{
+		url.pathname = path;
+		url.search = queryString;
+
+		assert(isGalleryUrl(url));
+
+		let {searchQuery} = stateFromUrl(url);
+		assert(searchQuery === expect);
+	};
+});
+
+test(_ => {
+	/* danbooru search queries */
+
+	let url = new URL(`https://danbooru.donmai.us`);
+	for (let [path, queryString, expect] of [
+		[`/`, ``, undefined],
+		[`/posts`, ``, undefined],
+		[`/posts/`, ``, undefined],
+		[`/posts`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],
+		[`/posts/`, `tags=id:<1837141 order:id`, `id:<1837141 order:id`],])
+	{
+		url.pathname = path;
+		url.search = queryString;
+
+		assert(isGalleryUrl(url));
+
+		let {searchQuery} = stateFromUrl(url);
+		assert(searchQuery === expect);
+	};
+});
+
+test(_ => {
+	/* gelbooru search queries */
+
+	let url = new URL(`https://rule34.xxx`);
+	for (let [path, queryString, expect] of [
+		[`/`, `page=post&s=list&tags=all`, undefined],
+		// todo
+		])
+	{
+		url.pathname = path;
+		url.search = queryString;
+
+		assert(isGalleryUrl(url));
+
+		let {searchQuery} = stateFromUrl(url);
+		assert(searchQuery === expect);
+	};
+});
+
+const searchQueryFromUrl = function({domain}, url) {
+	if (!(url instanceof URL)) {
+		return undefined;};
+
+	let domainKind = getDomainKind({domain});
+
+	let searchQuery = url.searchParams.get(`tags`);
+
+	if (domainKind === `danbooru`
+		&& domain !== `danbooru`)
+	{
+		let xs = tryParsePathFromUrl(url);
+		if (xs !== null
+			&& xs.length === 4
+			&& xs[0] === `post`
+			&& xs[1] === `index`
+			&& /^\d+$/.test(xs[2]))
+		{
+			searchQuery = xs[3];
+		};
+	};
+
+	if (typeof searchQuery !== `string`
+		|| !/\S/.test(searchQuery))
+	{
+		/* contains only whitespace characters */
+		return undefined;};
+
+	searchQuery = searchQuery.trim();
+
+	if (domainKind === `gelbooru`
+		&& searchQuery === `all`)
+	{
+		return undefined;};
+
+	return searchQuery;
+};
+
+const isGalleryUrl = function(url) {
+	if (!(url instanceof URL)) {
+		return false;};
+
+	let domain = hostnameDomainTbl[url.hostname];
+	if (domain === undefined) {
+		/* unknown site */
+		return false;};
+
+	switch (getDomainKind({domain})) {
+		case `danbooru` :
+			let xs = tryParsePathFromUrl(url);
+			if (domain === `danbooru`) {
+				return xs !== null
+					&& (xs.length === 0
+						|| (xs.length === 1
+							&& xs[0] === `posts`));
+			} else {
+				return xs !== null
+					&& xs[0] === `post`
+					&& (xs.length === 1 || xs[1] === `index`);
+			};
+
+		case `gelbooru` :
+			return (url.pathname === `/` || url.pathname === `/index.php`)
+				&& url.searchParams.get(`page`) === `post`
+				&& url.searchParams.get(`s`) === `list`;
+	};
+
+};
+
+test(_ => {
+	assert(isGalleryUrl(new URL(
+		`https://e621.net/post/index/1/absurdres?tags=id:<1837141 order:id`)));
+
+	// todo
+});
+
+const postIdFromUrl = function({domain}, url) {
+	if (!(url instanceof URL)) {
+		return -1;};
+
+	switch (getDomainKind({domain})) {
+		case `danbooru` :
+			let xs = tryParsePathFromUrl(url);
+			if (domain === `danbooru`) {
+				if (xs !== null && xs[0] === `posts`) {
+					return tryParsePostId(xs[1]);};
+			} else {
+				if (xs !== null && xs[0] === `post` && xs[1] === `show`) {
+					return tryParsePostId(xs[2]);};
+			};
+
+		case `gelbooru` :
+			if ((url.pathname === `/` || url.pathname === `/index.php`)
+				&& url.searchParams.get(`page`) === `post`
+				&& url.searchParams.get(`s`) === `view`)
+			{
+				return tryParsePostId(url.searchParams.get(`id`));
+			};
+	};
+
+	return -1;
+};
+
+test(_ => {
+	// todo
+});
+
+const requestPostInfoByIdUrl = function(state, postId) {
+	dbg && assert(isPostId(postId));
+
+	let url = new URL(state.origin);
+
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			if (state.domain === `danbooru`) {
+				url.pathname = `/posts.json`;
+			} else {
+				url.pathname = `/post/index.json`;};
+
+			url.searchParams.set(`limit`, `1`);
+			url.searchParams.set(`tags`, `id:${postId}`);
+
+			return url;
+
+		case `gelbooru` :
+			url.pathname = `/`;
+			url.searchParams.set(`page`, `dapi`);
+			url.searchParams.set(`s`, `post`);
+			url.searchParams.set(`q`, `index`);
+			url.searchParams.set(`limit`, `1`);
+			url.searchParams.set(`tags`, `id:${postId}`);
+			return url;
+	};
+
+	return null;
 };
 
 const requestNavigatePostInfoUrl = function(
 	state, postId, direction, searchQuery)
 {
-	enforce(isPostId(postId));
-	enforce(direction === `prev` || direction === `next`);
+	dbg && assert(isPostId(postId));
+	dbg && assert(direction === `prev` || direction === `next`);
+	dbg && assert(!searchQueryContainsOrderTerm(searchQuery));
 
-	let url = new URL(
-		`https://rule34.xxx/?page=dapi&s=post&q=index&limit=1`);
+	let url = new URL(state.origin);
 
-	let q =
-		direction === `prev`
-			? `id:<${postId} sort:id:desc`
-			: `id:>${postId} sort:id:asc`;
+	switch (getDomainKind(state)) {
+		case `danbooru` : {
+			if (state.domain === `danbooru`) {
+				url.pathname = `/posts.json`;
+			} else {
+				url.pathname = `/post/index.json`;};
 
-	if (typeof searchQuery === `string` && searchQuery.length !== 0) {
-		q += ` `+searchQuery;};
+			url.searchParams.set(`limit`, `1`);
 
-	url.searchParams.set(`tags`, q);
+			let q =
+				direction === `prev`
+					? `id:<${postId} order:-id`
+					: `id:>${postId} order:id`;
 
-	return url;
+			if (typeof searchQuery === `string` && searchQuery.length !== 0) {
+				q += ` `+searchQuery;};
+
+			url.searchParams.set(`tags`, q);
+
+			return url;
+		};
+
+		case `gelbooru` : {
+			url.pathname = `/`;
+			url.searchParams.set(`page`, `dapi`);
+			url.searchParams.set(`s`, `post`);
+			url.searchParams.set(`q`, `index`);
+			url.searchParams.set(`limit`, `1`);
+
+			let q =
+				direction === `prev`
+					? `id:<${postId} sort:id:desc`
+					: `id:>${postId} sort:id:asc`;
+
+			if (typeof searchQuery === `string` && searchQuery.length !== 0) {
+				q += ` `+searchQuery;};
+
+			url.searchParams.set(`tags`, q);
+
+			return url;
+		};
+	};
+
+	return null;
 };
+
+test(_ => {
+	let url = requestNavigatePostInfoUrl(
+		{domain : `r34xxx`, origin : `https://rule34.xxx`},
+		265, `next`, `absurdres`);
+
+	assert(url.origin === `https://rule34.xxx`);
+	assert(url.pathname === `/`);
+	assert(url.searchParams.get(`page`) === `dapi`);
+	assert(url.searchParams.get(`s`) === `post`);
+	assert(url.searchParams.get(`q`) === `index`);
+	assert(url.searchParams.get(`limit`) === `1`);
+	assert(url.searchParams.get(`tags`)
+		=== `id:>265 sort:id:asc absurdres`);
+
+	// todo
+});
 
 const postPageUrl = function(state, postId) {
-	enforce(isPostId(postId));
+	dbg && assert(isPostId(postId));
 
-	let url = new URL(`https://rule34.xxx/index.php?page=post&s=view`);
-	url.searchParams.set(`id`, `${postId}`);
-	return url;
-};
+	let url = new URL(state.origin);
 
-const imageUrl = function(state, imgPath) {
-	return new URL(
-		`https://img.rule34.xxx/images/${imgPath.dir}/${imgPath.filename}`);
-};
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			if (state.domain === `danbooru`) {
+				url.pathname = `/posts/${postId}`;
+			} else {
+				url.pathname = `/post/show/${postId}`;};
+			return url;
 
-const sampleImageUrl = function(state, imgPath) {
-	return new URL(
-		`https://img.rule34.xxx/samples/`
-		+`${imgPath.dir}/sample_${imgPath.filename}`);
+		case `gelbooru` :
+			url.pathname = `/index.php`;
+			url.searchParams.set(`page`, `post`);
+			url.searchParams.set(`s`, `view`);
+			url.searchParams.set(`id`, `${postId}`);
+			return url;
+	};
+
+	return null;
 };
 
 /* --- utilities --- */
-
-const tryParseHref = function(href) {
-	try {
-		return new URL(href);
-	} catch (x) {
-		return null;};
-};
-
-const tryParseJson = function(s) {
-	try {
-		return JSON.parse(s);
-	} catch (x) {
-		return undefined;};
-};
-
-const enforce = (cond, msg = `enforcement failed`) => {
-	if (!cond) {
-		let x = new Error();
-		throw new Error(`${msg} | ${x.stack}`);
-	};
-	return cond;
-};
 
 const requestTimeoutMs = 10000;
 
@@ -741,6 +1086,7 @@ const httpGet = function(url) {
 		};
 
 		let onSuccess = function(resp) {
+			dbg && assert(typeof resp === `object` && resp !== null);
 			if (resp.status === 200) {
 				return resolve(resp);
 			} else {
@@ -759,6 +1105,106 @@ const httpGet = function(url) {
 	});
 };
 
+const getSingleElemByClass = function(scopeElem, className) {
+	enforce(typeof className === `string`);
+	enforce(scopeElem instanceof Element || scopeElem instanceof Document);
+
+	let elems = scopeElem.getElementsByClassName(className);
+
+	if (elems.length !== 1) {
+		return null;};
+
+	return elems.item(0);
+};
+
+const tryParseHref = function(href) {
+	try {
+		return new URL(href);
+	} catch (x) {
+		return null;};
+};
+
+const tryParseJson = function(s) {
+	try {
+		return JSON.parse(s);
+	} catch (x) {
+		return undefined;};
+};
+
+const tryParsePathFromUrl = function(url) {
+	if (!(url instanceof URL)) {
+		return null;};
+
+	return tryParsePath(decodeURIComponent(url.pathname));
+};
+
+test(_ => {
+	let url = new URL(`https://x`)
+	url.pathname = `/id:<1837141 order:id`;
+
+	let xs = tryParsePathFromUrl(url);
+	assert(xs[0] === `id:<1837141 order:id`);
+});
+
+const tryParsePath = function(s) {
+	/* s is expected to already have been decoded via decodeURIComponent() */
+
+	if (typeof s !== `string` || s.length === 0 || s[0] !== `/`) {
+		return null;};
+
+	let components = [];
+
+	for (let i = 1, j = 1, n = s.length; i < n; ++i) {
+		if (s[i] === `/`) {
+			components.push(s.slice(j, i));
+			j = i + 1;
+		} else if (i === n - 1) {
+			components.push(s.slice(j, n));
+		};
+	};
+
+	return components;
+};
+
+test(_ => {
+	assert(tryParsePath(``) === null);
+	assert(tryParsePath(`post/`) === null);
+	assert(sequiv(tryParsePath(`/`), []));
+	assert(sequiv(tryParsePath(`/post`), [`post`]));
+	assert(sequiv(tryParsePath(`/post/`), [`post`]));
+	assert(sequiv(tryParsePath(`/post//`), [`post`, ``]));
+	assert(sequiv(tryParsePath(`/post/index`), [`post`, `index`]));
+	assert(sequiv(tryParsePath(`/post/index/`), [`post`, `index`]));
+	assert(sequiv(tryParsePath(`/post//index`), [`post`, ``, `index`]));
+	assert(sequiv(tryParsePath(`/post//index/`), [`post`, ``, `index`]));
+	assert(sequiv(tryParsePath(`/post/index//`), [`post`, `index`, ``]));
+});
+
+const tryParsePostId = function(s) {
+	if (typeof s !== `string`) {
+		return -1;};
+
+	let len = s.length;
+	let lenNibble = len & 0b1111; /* prevent excessive iteration */
+	let c0 = s.charCodeAt(0) - 48;
+
+	let invalid =
+		(lenNibble === 0)
+		| (len > 10)
+		| ((c0 >>> 1) > 4) /* c0 < 0 || c0 > 9 */
+		| ((c0 << 3) < (lenNibble >>> 1)) /* c0 === 0 && lenNibble !== 1 */
+		| (lenNibble === 10 && s > `2147483647`);
+
+	let n = c0;
+	for (let i = 1; i < lenNibble; ++i) {
+		let c = s.charCodeAt(i) - 48;
+		n = Math.imul(10, n) + c;
+		invalid |= ((c >>> 1) > 4); /* c < 0 || c > 9 */
+	};
+
+	return n | -invalid;
+};
+
 const escapeAttr = function(chars) {
 	let s = ``;
 	for (let c of chars) {
@@ -774,19 +1220,68 @@ const escapeAttr = function(chars) {
 	return s;
 };
 
-const maybeScrollIntoView = function(viewport /* window */, el) {
+const maybeScrollIntoView = function(
+	viewport /* window */, el, behavior = `smooth`)
+{
 	if (!(el instanceof Element)) {
 		return;};
 
 	let rect = el.getBoundingClientRect();
-	if (typeof viewport !== `object`
-		||rect.left < 0
+	if (!viewport
+		|| rect.left < 0
 		|| rect.right > viewport.innerWidth
 		|| rect.top < 0
 		|| rect.bottom > viewport.innerHeight)
 	{
-		el.scrollIntoView({
-			behavior : `instant`,});
+		el.scrollIntoView({behavior});
+	};
+};
+
+const sequiv = function(xs, ys, pred = Object.is) {
+	/* compare two sequences for equivalence */
+
+	if (xs === ys) {
+		return true;};
+
+	let xsIter = xs[Symbol.iterator]();
+	let ysIter = ys[Symbol.iterator]();
+	let xObj, yObj;
+
+	dbg && assert(typeof xsIter === `object`);
+	dbg && assert(typeof ysIter === `object`);
+
+	while (true) {
+		xObj = xsIter.next();
+		yObj = ysIter.next();
+
+		dbg && assert(typeof xObj === `object`);
+		dbg && assert(typeof yObj === `object`);
+
+		if (xObj.done) {
+			break;};
+
+		if (yObj.done) {
+			return false;};
+
+		if (!pred(xObj.value, yObj.value)) {
+			return false;};
+	};
+
+	return yObj.done;
+};
+
+const enforce = function(cond, msg = `enforcement failed`) {
+	if (!cond) {
+		let x = new Error();
+		throw new Error(`${msg} | ${x.stack}`);
+	};
+	return cond;
+};
+
+const assert = function(cond, msg = `assertion failed`) {
+	if (!cond) {
+		debugger;
+		throw new Error(msg);
 	};
 };
 
@@ -809,231 +1304,246 @@ const ensureApplyStyleRules = function(doc, getRules) {
 		style.sheet.insertRule(rule, style.sheet.cssRules.length);};
 };
 
-const getGlobalStyleRules = () => [
-	/* --- vars --- */
+const getGlobalStyleRules = function(domain) {
+	let thumbClass = getThumbClass({domain});
+	let darkTheme = domain === `danbooru`;
 
-	`:root {
-		--${qual('c-base')} : hsl(0, 0%, 40%);
-		--${qual('c-base-active')} : hsl(0, 0%, 50%);
-		--${qual('c-iv-action')} : hsl(33, 100%, 75%);
-		--${qual('c-ex-link')} : hsl(233, 100%, 75%);
-	}`,
+	return [
+		/* --- vars --- */
 
-	/* --- inline view --- */
+		`:root {
+			--${qual('c-base')} :
+				${darkTheme
+					? `hsla(0, 0%, 30%, 0.5)`
+					: `hsla(0, 0%, 100%, 0.5)`};
+			--${qual('c-iv-action')} : hsl(33, 100%, 70%);
+			--${qual('c-ex-link')} : hsl(233, 100%, 75%);
+		}`,
 
-	`.${qual('iv-panel')} {
-		display : flex;
-		flex-direction : column;
-		align-items : center;
-		justify-content : flex-start;
-		min-height : calc(20rem + 50vh);
-	}`,
+		/* --- inline view --- */
 
-	`.${qual('iv-content-panel')} {
-		display : flex;
-		justify-content : center;
-		align-items : center;
-		min-height : 10rem;
-	}`,
+		`.${qual('iv-panel')} {
+			display : flex;
+			flex-direction : column;
+			align-items : center;
+			justify-content : flex-start;
+			min-height : calc(20rem + 50vh);
+		}`,
 
-	`.${qual('iv-content-stack')} {
-		display : grid;
-		justify-items : center;
-		align-items : center;
-	}`,
+		`.${qual('iv-content-panel')} {
+			display : flex;
+			justify-content : center;
+			align-items : center;
+			min-height : 10rem;
+		}`,
 
-	`.${qual('iv-content-stack')} > * {
-		grid-column : 1;
-		grid-row : 1;
-	}`,
+		`.${qual('iv-content-stack')} {
+			display : grid;
+			justify-items : center;
+			align-items : center;
+		}`,
 
-	`.${qual('iv-content-stack')}.${qual('scale-fit')} > * {
-		max-width : 100vw;
-		max-height : 100vh;
-	}`,
+		`.${qual('iv-content-stack')} > * {
+			grid-column : 1;
+			grid-row : 1;
+		}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-media')} {
-		z-index : 2;
-	}`,
+		`.${qual('iv-content-stack')}.${qual('scale-fit')} > * {
+			max-width : 100vw;
+			max-height : 100vh;
+		}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-media-sample')} {
-		z-index : 1;
-	}`,
+		`.${qual('iv-content-stack')} > .${qual('iv-media')} {
+			z-index : 2;
+		}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')} {
-		z-index : 0;
-		opacity : 0.5;
-	}`,
+		`.${qual('iv-content-stack')} > .${qual('iv-media-sample')} {
+			z-index : 1;
+		}`,
 
-	`.${qual('iv-content-stack')} > .${qual('iv-media-sample')},
-	.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')}
-	{
-		width : auto;
-		height : 100%;
-	}`,
+		`.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')} {
+			z-index : 0;
+			opacity : 0.5;
+		}`,
 
-	`.${qual('iv-header')}, .${qual('iv-footer')} {
-		max-width : 100vw;
-		width : 50rem;
-		min-height : 3rem;
-		background-color : var(--${qual('c-base')});
-	}`,
+		`.${qual('iv-content-stack')} > .${qual('iv-media-sample')},
+		.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')}
+		{
+			width : auto;
+			height : 100%;
+		}`,
 
-	/* --- controls --- */
+		`.${qual('iv-header')}, .${qual('iv-footer')} {
+			max-width : 100vw;
+			width : 50rem;
+			min-height : 3rem;
+		}`,
 
-	`.${qual('iv-ctrls')} {
-		display : flex;
-		flex-direction : row;
-		align-items : stretch;
-		justify-content : center;
-	}`,
+		`.${qual('iv-header')} > *, .${qual('iv-footer')} {
+			background-color : var(--${qual('c-base')});
+			opacity : 0.60;
+		}`,
 
-	`.${qual('iv-ctrls')} > * {
-		/* equal sizes: */
-		flex-basis : 0;
-		flex-grow : 1;
+		/* --- controls --- */
 
-		/* centre contents: */
-		display : flex;
-		align-items : center;
-		justify-content : center;
-	}`,
+		`.${qual('iv-ctrls')} {
+			display : flex;
+			flex-direction : row;
+			align-items : stretch;
+			justify-content : center;
+		}`,
 
-	`.${qual('iv-ctrls')} > a {
-		opacity : 0.5;
-	}`,
+		`.${qual('iv-ctrls')} > * {
+			/* equal sizes: */
+			flex-basis : 0;
+			flex-grow : 1;
 
-	`.${qual('iv-ctrls')} > a:hover {
-		background-color : var(--${qual('c-base-active')});
-		opacity : 1;
-	}`,
+			/* centre contents: */
+			display : flex;
+			align-items : center;
+			justify-content : center;
+		}`,
 
-	`.${qual('iv-ctrls')} > * > .${qual('btn-icon')} {
-		margin : 0;
-		width : 2rem;
-		height : 2rem;
-		background-size : cover;
-		background-image : url(${svgCircleRingHref});
-	}`,
+		`.${qual('iv-ctrls')} > a:hover {
+			opacity : 1;
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('scale')}.${qual('full')}
-		> .${qual('btn-icon')}
-	{
-		background-image : url(${svgCircleExpandHref});
-	}`,
+		`.${qual('iv-ctrls')} > * > .${qual('btn-icon')} {
+			margin : 0;
+			width : 2rem;
+			height : 2rem;
+			background-size : cover;
+			background-image : url(${svgCircleRingHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('scale')}.${qual('fit')}
-		> .${qual('btn-icon')}
-	{
-		background-image : url(${svgCircleContractHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('scale')}.${qual('full')}
+			> .${qual('btn-icon')}
+		{
+			background-image : url(${svgCircleExpandHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('ready')}
-		> .${qual('btn-icon')}
-	{
-		background-image : url(${svgCircleArrowRightHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('scale')}.${qual('fit')}
+			> .${qual('btn-icon')}
+		{
+			background-image : url(${svgCircleContractHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('ex')}:hover {
-		background-color : var(--${qual('c-ex-link')});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('ready')}
+			> .${qual('btn-icon')}
+		{
+			background-image : url(${svgCircleArrowRightHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('ex')} > .${qual('btn-icon')} {
-		background-image : url(${svgCircleLinkHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('ex')}:hover {
+			background-color : var(--${qual('c-ex-link')});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('next')}.${qual('ready')}
-		> .${qual('btn-icon')}
-	{
-		background-image : url(${svgCircleArrowLeftHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('ex')} > .${qual('btn-icon')} {
+			background-image : url(${svgCircleLinkHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('close')}:hover {
-		background-color : var(--${qual('c-iv-action')});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('next')}.${qual('ready')}
+			> .${qual('btn-icon')}
+		{
+			background-image : url(${svgCircleArrowLeftHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('close')} > .${qual('btn-icon')} {
-		background-image : url(${svgCircleArrowUpHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('close')}:hover {
+			background-color : var(--${qual('c-iv-action')});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')},
-	.${qual('iv-ctrls')} > .${qual('prev')}.${qual('disabled')},
-	.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')},
-	.${qual('iv-ctrls')} > .${qual('next')}.${qual('disabled')}
-	{
-		pointer-events : none;
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('close')} > .${qual('btn-icon')} {
+			background-image : url(${svgCircleArrowUpHref});
+		}`,
 
-	`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')}
-		> .${qual('btn-icon')},
-	.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')}
-		> .${qual('btn-icon')}
-	{
-		${spinnerStyleRules}
-		background-image : url(${svgCircleSpinnerHref});
-	}`,
+		`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')},
+		.${qual('iv-ctrls')} > .${qual('prev')}.${qual('disabled')},
+		.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')},
+		.${qual('iv-ctrls')} > .${qual('next')}.${qual('disabled')}
+		{
+			pointer-events : none;
+		}`,
 
-	/* --- thumbnails --- */
+		`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')}
+			> .${qual('btn-icon')},
+		.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')}
+			> .${qual('btn-icon')}
+		{
+			${spinnerStyleRules}
+			background-image : url(${svgCircleSpinnerHref});
+		}`,
 
-	`.thumb {
-		position : relative;
-		/* centre the thumbnail images: */
-		display : flex !important;
-		align-items : center;
-		justify-content : center;
-	}`,
+		/* --- thumbnails --- */
 
-	`.thumb > .${qual('thumb-overlay')} {
-		display : flex;
-		flex-direction : column;
-		position : absolute;
-		top : 0;
-		left : 0;
-		bottom : 0;
-		right : 0;
-	}`,
+		`.${thumbClass} {
+			position : relative;
+			/* centre the thumbnail images: */
+			display : inline-flex !important;
+			flex-direction : column;
+			align-items : center;
+			justify-content : center;
+		}`,
 
-	`.thumb > .${qual('thumb-overlay')} > * {
-		display : block;
-		flex-grow : 1;
-	}`,
+		`.${thumbClass} > .post-score {
+			${domain === `e621`
+				? `margin-top : unset !important;
+					margin-bottom : unset !important;`
+				: ``}
+		}`,
 
-	`.thumb > .${qual('thumb-overlay')} > a {
-		background-position : center;
-		background-repeat : no-repeat;
-		background-size : 30%;
-		opacity : 0.7;
-	}`,
+		`.${thumbClass} > .${qual('thumb-overlay')} {
+			display : flex;
+			flex-direction : column;
+			position : absolute;
+			z-index : 32767;
+			top : 0;
+			left : 0;
+			bottom : 0;
+			right : 0;
+		}`,
 
-	`.thumb > .${qual('thumb-overlay')}
-		> a.${qual('thumb-ex-link')}:hover
-	{
-		background-image : url(${svgCircleLinkHref});
-		background-color : var(--${qual('c-ex-link')});
-	}`,
+		`.${thumbClass} > .${qual('thumb-overlay')} > * {
+			display : block;
+			flex-grow : 1;
+		}`,
 
-	`.thumb > .${qual('thumb-overlay')}
-		> a.${qual('thumb-in-link')}:hover,
-	.thumb.${qual('selected')} > .${qual('thumb-overlay')}
-		> a.${qual('thumb-in-link')}
-	{
-		background-image : url(${svgCircleArrowDownHref});
-		background-color : var(--${qual('c-iv-action')});
-	}`,
+		`.${thumbClass} > .${qual('thumb-overlay')} > a {
+			background-position : center;
+			background-repeat : no-repeat;
+			background-size : 30%;
+			opacity : 0.7;
+		}`,
 
-	`.thumb.${qual('selected')} > .${qual('thumb-overlay')}
-		> a.${qual('thumb-in-link')}:hover
-	{
-		background-image : url(${svgCircleArrowUpHref});
-	}`,
+		`.${thumbClass} > .${qual('thumb-overlay')}
+			> a.${qual('thumb-ex-link')}:hover
+		{
+			background-image : url(${svgCircleLinkHref});
+			background-color : var(--${qual('c-ex-link')});
+		}`,
 
-	/* --- animation --- */
+		`.${thumbClass} > .${qual('thumb-overlay')}
+			> a.${qual('thumb-in-link')}:hover,
+		.${thumbClass}.${qual('selected')} > .${qual('thumb-overlay')}
+			> a.${qual('thumb-in-link')}
+		{
+			background-image : url(${svgCircleArrowDownHref});
+			background-color : var(--${qual('c-iv-action')});
+		}`,
 
-	`@keyframes ${qual('spinner')} {
-		from {}
-		to {transform : rotate(1.0turn);}
-	}`,
-];
+		`.${thumbClass}.${qual('selected')} > .${qual('thumb-overlay')}
+			> a.${qual('thumb-in-link')}:hover
+		{
+			background-image : url(${svgCircleArrowUpHref});
+		}`,
+
+		/* --- animation --- */
+
+		`@keyframes ${qual('spinner')} {
+			from {}
+			to {transform : rotate(1.0turn);}
+		}`,
+	];
+};
 
 const spinnerStyleRules =
 	`animation-name : ${qual('spinner')};
@@ -1244,6 +1754,20 @@ const svgCircleContractHref = svgBlobHref(
 	</svg>`);
 
 /* -------------------------------------------------------------------------- */
+
+if (dbg) {
+	let passCount = 0;
+	for (let f of unittests) {
+		try {
+			f();
+			++passCount;
+		} catch (x) {
+			console.warn(`${namespace}:`, `unittest failure`);
+			console.error(`${x.message} | ${x.stack}`);};
+	};
+	console.info(`${namespace}:`,
+		`${passCount}/${unittests.length} unittests passed`);
+};
 
 entrypoint();
 
