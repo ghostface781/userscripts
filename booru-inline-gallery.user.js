@@ -1,14 +1,18 @@
 ﻿// ==UserScript==
 // @name		Booru: Inline Gallery
 // @namespace	6930e44863619d3f19806f68f74dbf62
-// @match		*://rule34.xxx/*
-// @match		*://e621.net/*
-// @match		*://danbooru.donmai.us/*
-// @match		*://realbooru.com/*
-// @version		2019-04-10
+// @version		2019-04-11
 // @downloadURL	https://github.com/bipface/userscripts/raw/master/booru-inline-gallery.user.js
 // @run-at		document-end
 // @grant		GM_xmlhttpRequest
+// @match		*://danbooru.donmai.us/*
+// @match		*://e621.net/*
+// @match		*://gelbooru.com/*
+// @match		*://realbooru.com/*
+// @match		*://rule34.xxx/*
+// @match		*://safebooru.org/*
+// @match		*://testbooru.donmai.us/*
+// @match		*://yande.re/*
 // ==/UserScript==
 
 'use strict';
@@ -17,32 +21,34 @@
 
 	known issues/limitations:
 		- only tested on firefox (56)
-		- placeholder SVG blocked by easylist
-		- hotkeys sometimes don't work?
-			(maybe attach to the window instead of the document)
-		- doesn't work on gelbooru or yandere, yet
-		- tooltips broken on danbooru
-		- animated gif / video loses playback position when scale-mode changes
+		- need proper svgErrorPlaceholder
+		- swf videos not supported yet
+		- on e621 it seems only one id:* search term can be specified
+			test: https://e621.net/post/index.json?tags=id:500%20id:%3E1000%20order:id&limit=1
+		- probably won't work with danbooru's zip-player videos
+			test: https://danbooru.donmai.us/posts/3471696
 		- controls typically end up off-screen; hinders navigation by clicking
 			(mainly affects mobile browsing)
 		- can't navigate when search query includes sort:* / order:*
-		- won't work with danbooru's zip-player videos
-		- 2-tag search limit on danbooru breaks navigation
-		- loading full-size images may not always be desirable
-			(e.g. mobile browsing with small data allowance)
-		- scale-mode 'full' doesn't seem to work well on rule34's mobile layout
 		- media type badge is misaligned on e621 thumbnails
-		- on some boorus, the first few posts of the default gallery may not
-			work due to the search database being up to 5 minutes behind
-			the main database
-		- smooth scrollIntoView() can get erratic when navigating
-		- can't show notes
+		- scale-mode 'full' doesn't seem to work well on r34xxx's mobile layout
 		- thumbnail appears even when full-size image loads from cache
 			(causes background 'flashing' when navigating
 			through images with transparent backgrounds)
 		- thumbnail may remain visible after the first frame of an animation is
 			fully rendered (noticible with alpha-transparent gifs)
+		- smooth scrollIntoView() can get erratic when navigating
+		- animated gif / video loses playback position when scale-mode changes
 		- player appears with wrong dimensions before video starts loading
+		- loading full-size images may not always be desirable
+			(e.g. mobile browsing with small data allowance)
+		- 2-tag search limit on danbooru breaks navigation
+		- placeholder SVG blocked by easylist (r34xxx/gelbooru)
+			prevents auto-scrolling to iv-panel
+		- can't show notes
+		- on some boorus, the first few posts of the default gallery may not
+			work due to the search database being up to 5 minutes behind
+			the main database
 		- post-ids cannot be greater than 2147483647
 
 	proposed enhancements:
@@ -63,36 +69,48 @@ const test =
 		? f => unittests.push(f)
 		: () => {};
 
-const entrypoint = function() {
-	if (!isGalleryUrl(tryParseHref(location.href))) {
+const entrypoint = function(doc) {
+	enforce(doc instanceof HTMLDocument);
+
+	if (!isGalleryUrl(tryParseHref(doc.location.href))) {
+		console.info(`document does not appear to be a gallery; aborting`);
 		return;};
 
-	document.addEventListener(`keydown`, onKeyDown, true);
+	enforce(doc.readyState !== `loading`);
 
-	window.addEventListener(
+	doc.defaultView.addEventListener(
+		`keydown`,
+		onKeyDown,
+		true);
+
+	doc.defaultView.addEventListener(
 		`hashchange`,
-		ev => applyToDocument(ev.target.document, ev.newURL),
+		ev => applyToDocument(doc),
 		false);
 
-	applyToDocument(document, location.href);
+	applyToDocument(doc);
 };
 
 const onKeyDown = function(ev) {
 	/* global hotkeys: */
 
+	let doc = ev.target.ownerDocument;
+
 	if (ev.key === `ArrowRight` || ev.key === `Right`) {
-		let btn = getSingleElemByClass(ev.target, qual(`prev`));
+		let btn = getSingleElemByClass(doc, qual(`prev`));
 		if (btn instanceof HTMLElement) {
 			btn.click();
 			ev.stopPropagation();};
 
 	} else if (ev.key === `ArrowLeft` || ev.key === `Left`) {
-		let btn = getSingleElemByClass(ev.target, qual(`next`));
+		let btn = getSingleElemByClass(doc, qual(`next`));
 		if (btn instanceof HTMLElement) {
 			btn.click();
 			ev.stopPropagation();};
 	};
 };
+
+
 
 /* -------------------------------------------------------------------------- */
 
@@ -113,33 +131,39 @@ const qual = function(n) {
 };
 
 const hostnameDomainTbl = {
-	[`rule34.xxx`] : `r34xxx`,
+	[`danbooru.donmai.us`] : `danbooru`,
 	[`gelbooru.com`] : `gelbooru`,
 	[`e621.net`] : `e621`,
-	[`danbooru.donmai.us`] : `danbooru`,
-	[`yande.re`] : `yandere`,
-	[`safebooru.org`] : `safebooru`,
 	[`realbooru.com`] : `realbooru`,
+	[`rule34.xxx`] : `r34xxx`,
+	[`safebooru.org`] : `safebooru`,
+	[`testbooru.donmai.us`] : `danbooru`,
+	[`yande.re`] : `yandere`,
 };
 
 const domainKindTbl = {
-	e621 : `danbooru`,
 	danbooru : `danbooru`,
-	yandere : `danbooru`,
-	r34xxx : `gelbooru`,
+	e621 : `danbooru`,
 	gelbooru : `gelbooru`,
-	safebooru : `gelbooru`,
+	r34xxx : `gelbooru`,
 	realbooru : `gelbooru`,
+	safebooru : `gelbooru`,
+	yandere : `danbooru`, /* moebooru */
 };
 
-const applyToDocument = function(doc, href) {
+const applyToDocument = function(doc) {
 	enforce(doc instanceof HTMLDocument);
 
-	let url = tryParseHref(href);
-	if (!isGalleryUrl(url)) {return;};
+	let url = tryParseHref(doc.location.href);
+	if (!isGalleryUrl(url)) {
+		console.info(`document does not appear to be a gallery; aborting`);
+		return;};
 
 	let state = stateFromUrl(url);
-	if (state === null) {return;};
+	if (state === null) {
+		console.error(
+			`failed to derive state from url "${url.href}"; aborting`);
+		return;};
 
 	ensureApplyStyleRules(doc, () => getGlobalStyleRules(state.domain));
 
@@ -147,19 +171,26 @@ const applyToDocument = function(doc, href) {
 	let view = getInlineView(state, viewParent);
 
 	if (!isPostId(state.currentPostId)) {
-		if (view) {
+		if (view !== null) {
 			view.remove();};
 	} else {
-		if (!view) {
+		if (view === null) {
 			view = ensureInlineView(state, doc, viewParent);};
 
-		if (view) {
-			bindInlineView(state, doc, view);};
+		if (view !== null) {
+			bindInlineView(state, doc, view);
+		} else {
+			console.error(`failed to create inline-view panel`);};
 	};
 
-	let thumbsParent = getThumbnailsParent(state, doc);
-	if (thumbsParent) {
-		bindThumbnailsList(state, doc, thumbsParent);};
+	let thumbsElem = getThumbnailsListElem(state, doc);
+	if (thumbsElem !== null) {
+		bindThumbnailsList(state, doc, thumbsElem);
+	} else {
+		console.error(`failed to find thumbnail list element`);};
+
+	if (state.domain === `danbooru`) {
+		ensureForwardDanbooruTooltipEvents(state, doc);};
 };
 
 const bindInlineView = async function(state, doc, view) {
@@ -237,23 +268,25 @@ const bindInlineView = async function(state, doc, view) {
 		view, qual(`iv-media-placeholder`)));
 
 	let info = await tryGetPostInfo(state, state.currentPostId);
-	if (info !== null) {
-		stackElem.classList.toggle(
-			qual('scale-fit'), state.scaleMode === `fit`);
 
-		{/* scroll to the placeholder when it loads: */
-			let triggered = false;
-			let f = ev => {
-				phldrElem.removeEventListener(ev.type, f);
-				if (!triggered) {
-					maybeScrollIntoView(
-						doc.defaultView, phldrElem, `instant`);};
-				triggered = true;
-			};
-			phldrElem.addEventListener(`load`, f);
-			phldrElem.addEventListener(`loadedmetadata`, f);
+	stackElem.classList.toggle(
+		qual('scale-fit'), state.scaleMode === `fit`);
+
+	{/* scroll to the placeholder when it loads: */
+		let triggered = false;
+		let f = ev => {
+			phldrElem.removeEventListener(ev.type, f);
+			if (!triggered) {
+				console.log(`media-placeholder ${ev.type} event triggered`);
+				maybeScrollIntoView(
+					doc.defaultView, phldrElem, `instant`);};
+			triggered = true;
 		};
+		phldrElem.addEventListener(`load`, f);
+		phldrElem.addEventListener(`loadedmetadata`, f);
+	};
 
+	if (info !== null) {
 		phldrElem.src = `data:image/svg+xml,`+encodeURIComponent(
 			svgEmptyPlaceholder(info.width, info.height));
 
@@ -286,6 +319,12 @@ const bindInlineView = async function(state, doc, view) {
 			imgElem.src = info.imageHref;
 			imgElem.hidden = false;
 		};
+	} else {
+		console.warn(
+			`failed to acquire metadata for current post`+
+			` (id:${state.currentPostId})`);
+
+		phldrElem.src = svgErrorPlaceholderHref;
 	};
 
 	let prevBtn = enforce(getSingleElemByClass(view, qual(`prev`)));
@@ -360,15 +399,17 @@ const primeNavigationButton = async function(state, doc, btn, direction) {
 	btn.classList.add(qual(`ready`));
 };
 
-const bindThumbnailsList = function(state, doc, thumbsParent) {
-	for (let thumb of thumbsParent.children) {
+const bindThumbnailsList = function(state, doc, scopeElem) {
+	let thumbs = scopeElem.getElementsByClassName(getThumbClass(state.domain));
+	console.log(`binding ${thumbs.length} thumbnail elements`);
+	for (let thumb of thumbs) {
 		bindThumbnail(state, doc, thumb);};
 };
 
 const bindThumbnail = function(state, doc, thumb) {
 	let info = thumbnailInfo(state, thumb);
 	if (info === null) {
-		return null;};
+		return;};
 
 	thumb.classList.toggle(qual(`selected`),
 		info.postId === state.currentPostId);
@@ -435,29 +476,33 @@ const getInlineView = function(state, parentElem) {
 };
 
 const getInlineViewParent = function(state, doc) {
-	return getSingleElemByClass(doc, `content-post`) /* gelbooru */
+	return getSingleElemByClass(doc, `content-post`) /* r34xxx */
 		|| getSingleElemByClass(doc, `content`) /* e621 */
-		|| doc.getElementById(`content`) /* danbooru */;
+		|| doc.getElementById(`content`) /* danbooru */
+		|| getSingleElemByClass(doc, `contain-push`) /* gelbooru */;
 };
 
-const getThumbnailsParent = function(state, doc) {
-	let outerElem = getInlineViewParent(state, doc);
-	if (outerElem === null) {
+const getThumbnailsListElem = function(state, doc) {
+	let elem = getInlineViewParent(state, doc);
+	if (elem === null) {
 		return null;};
 
-	let firstThumb = outerElem.getElementsByClassName(
-		getThumbClass(state)).item(0);
+	let firstThumb = elem.getElementsByClassName(
+		getThumbClass(state.domain)).item(0);
 	if (firstThumb === null) {
 		return null;};
 
-	return firstThumb.parentElement;
+	return elem;
+
+	/* note we may not get the direct parent of the .thumb elements
+	because some sites (e.g. yande.re) nest them more deeply */
 };
 
 const thumbnailInfo = function(state, elem) {
 	enforce(elem instanceof HTMLElement);
 
 	let info = null;
-	for (let c of elem.children) {
+	for (let c of chain([elem], elem.children)) {
 		if (!(c instanceof HTMLAnchorElement)) {
 			continue;}
 
@@ -531,13 +576,63 @@ const getDomainKind = function({domain}) {
 	return k;
 };
 
-const getThumbClass = function({domain}) {
+const getThumbClass = function(domain) {
 	dbg && assert(typeof domain === `string`);
 
 	return domain === `danbooru`
 		? `post-preview`
 		: `thumb`;
 };
+
+const ensureForwardDanbooruTooltipEvents = function(state, doc) {
+	dbg && assert(doc instanceof HTMLDocument);
+	enforce(doc.body instanceof HTMLBodyElement);
+
+	if (doc.getElementById(qual(`forward-tooltip-events`)) !== null) {
+		return;};
+
+	let scriptEl = doc.createElement(`script`);
+	scriptEl.id = qual(`forward-tooltip-events`);
+	scriptEl.textContent = getForwardDanbooruTooltipEventsScriptText;
+	doc.body.append(scriptEl);
+};
+
+const getForwardDanbooruTooltipEventsScriptText = `{
+	/* refer to danbooru/app/javascript/src/javascripts/post_tooltips.js */
+
+	let onEvent = function(ev) {
+		let ovr = ev.target.closest('.${qual('thumb-overlay')}');
+		if (ovr === null) {
+			return;};
+
+		/* forward to element where danbooru's handlers are attached: */
+
+		let xs = ovr.parentElement.getElementsByTagName('img');
+		if (xs.length !== 1) {
+			return;};
+		let newTarget = xs.item(0);
+
+		/* precaution against infinite loops: */
+		if (ovr.contains(newTarget)) {
+			return;};
+
+		if (ev instanceof MouseEvent) {
+			newTarget.dispatchEvent(
+				new MouseEvent(ev.type, ev));
+		} else if (ev instanceof TouchEvent) {
+			newTarget.dispatchEvent(
+				new TouchEvent(ev.type, ev));
+		};
+	};
+
+	document.addEventListener('mouseover', onEvent, false);
+	document.addEventListener('mouseout', onEvent, false);
+	document.addEventListener('touchstart', onEvent, false);
+	document.addEventListener('touchend', onEvent, false);
+
+	/* note: jQuery mouseenter/mouseleave events are
+		equivalent to native mouseover/mouseout events */
+};`;
 
 /* --- post info --- */
 
@@ -643,6 +738,13 @@ const tryNavigatePostInfo = async function(
 		return null;};
 	dbg && assert(isPostId(info.postId));
 
+	if (direction === `prev`
+		? info.postId >= fromPostId
+		: info.postId <= fromPostId)
+	{
+		/* result takes us in the wrong direction */
+		return null;};
+
 	postInfoTbl.set(info.postId, info);
 
 	apiRequPostIdCache.set(cacheKey, info.postId);
@@ -711,7 +813,7 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 	if (thumbnailHref === imageHref) {
 		thumbnailHref = undefined;
 	} else if (state.domain === `r34xxx`) {
-		/* rule34 search result pages have the post id at the end of the
+		/* r34xxx search result pages have the post id at the end of the
 		thumbnail image url, but api search results don't,
 		add it to avoid cache misses: */
 		let url = tryParseHref(thumbnailHref);
@@ -1103,7 +1205,7 @@ const tryHttpGet = async function(...args) {
 	try {
 		return await httpGet(...args);
 	} catch (x) {
-		console.error(x);
+		console.error(x.message);
 		return null;};
 };
 
@@ -1303,6 +1405,48 @@ const sequiv = function(xs, ys, pred = Object.is) {
 	return yObj.done;
 };
 
+const chainIterProto = {
+	next() {
+		while (this.idx < this.xss.length) {
+			if (this.subIter === null) {
+				this.subIter =
+					this.xss[this.idx][Symbol.iterator]();};
+
+			let next = this.subIter.next();
+			if (!next.done) {
+				return next;};
+
+			this.subIter = null;
+			++this.idx;
+		};
+
+		return {done : true};
+	},
+
+	[Symbol.iterator]() {return this;},
+};
+
+const chainResultProto = {
+	[Symbol.iterator]() {
+		return {
+			__proto__ : chainIterProto,
+			xss : this.xss,
+			idx : 0,
+			subIter : null,};
+	},
+};
+
+const chain = function(...xss) {
+	dbg && xss.every(xs => assert(isIterable(xs)));
+	return {
+		__proto__ : chainResultProto,
+		xss,};
+};
+
+const isIterable = function(xs) {
+	return xs != null && typeof xs[Symbol.iterator] === `function`;
+};
+
 const enforce = function(cond, msg = `enforcement failed`) {
 	if (!cond) {
 		let x = new Error();
@@ -1321,7 +1465,7 @@ const assert = function(cond, msg = `assertion failed`) {
 /* --- styles --- */
 
 const ensureApplyStyleRules = function(doc, getRules) {
-	enforce(doc instanceof HTMLDocument);
+	dbg && assert(doc instanceof HTMLDocument);
 	enforce(doc.head instanceof HTMLHeadElement);
 
 	if (doc.getElementById(qual(`global-stylesheet`))
@@ -1338,8 +1482,13 @@ const ensureApplyStyleRules = function(doc, getRules) {
 };
 
 const getGlobalStyleRules = function(domain) {
-	let thumbClass = getThumbClass({domain});
-	let darkTheme = domain === `danbooru`;
+	let thumbClass = getThumbClass(domain);
+
+	/* sites with white background: */
+	let darkTheme =
+		domain === `danbooru`
+		|| domain === `gelbooru`
+		|| domain === `safebooru`;
 
 	return [
 		/* --- vars --- */
@@ -1511,8 +1660,13 @@ const getGlobalStyleRules = function(domain) {
 
 		`.${thumbClass} {
 			position : relative;
+
 			/* centre the thumbnail images: */
-			display : inline-flex !important;
+
+			${domain === `yandere`
+				? `display : flex !important;` /* thumbnails nested in <li> */
+				: `display : inline-flex !important;`}
+
 			flex-direction : column;
 			align-items : center;
 			justify-content : center;
@@ -1534,6 +1688,10 @@ const getGlobalStyleRules = function(domain) {
 			left : 0;
 			bottom : 0;
 			right : 0;
+
+			/* some sites (e.g. safebooru) set a default background
+			colour for generic elements (e.g. <div>) */
+			background-color : transparent;
 		}`,
 
 		`.${thumbClass} > .${qual('thumb-overlay')} > * {
@@ -1612,6 +1770,11 @@ const svgEmptyPlaceholder = function(w, h) {
 	return `<svg xmlns='http://www.w3.org/2000/svg'`
 		+` width='${w|0}' height='${h|0}'><path/></svg>`;
 };
+
+const svgErrorPlaceholderHref = svgBlobHref(
+	`<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>
+		<rect x='0' y='0' width='100' height='100' fill='#f0f'/>
+	</svg>`);
 
 const svgCircleArrow = function(rot = 0) {
 	return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'>
@@ -1819,6 +1982,6 @@ if (dbg) {
 		`${passCount}/${unittests.length} unittests passed`);
 };
 
-entrypoint();
+entrypoint(document);
 
 /* -------------------------------------------------------------------------- */
