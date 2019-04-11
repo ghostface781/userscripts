@@ -5,6 +5,7 @@
 // @downloadURL	https://github.com/bipface/userscripts/raw/master/booru-inline-gallery.user.js
 // @run-at		document-end
 // @grant		GM_xmlhttpRequest
+// @grant		GM.xmlHttpRequest
 // @match		*://danbooru.donmai.us/*
 // @match		*://e621.net/*
 // @match		*://gelbooru.com/*
@@ -20,7 +21,7 @@
 /*
 
 	known issues/limitations:
-		- only tested on firefox (56)
+		- not tested with rule34 default theme
 		- need proper svgErrorPlaceholder
 		- swf videos not supported yet
 		- on e621 it seems only one id:* search term can be specified
@@ -109,8 +110,6 @@ const onKeyDown = function(ev) {
 			ev.stopPropagation();};
 	};
 };
-
-
 
 /* -------------------------------------------------------------------------- */
 
@@ -298,6 +297,8 @@ const bindInlineView = async function(state, doc, view) {
 			vidElem.src = info.imageHref;
 			vidElem.hidden = false;
 
+			//imgElem.addEventListener(`load`, ev => {
+
 		} else {
 			if (info.sampleHref) {
 				// disabled for now as it interferes with the alpha-channel
@@ -308,6 +309,7 @@ const bindInlineView = async function(state, doc, view) {
 
 			/* hide the resampled versions when the full image loads: */
 			imgElem.addEventListener(`load`, ev => {
+				console.log(`media (image) ${ev.type} event triggered`);
 				thumbnailElem.classList.add(qual('animate-to-hidden'));
 				//thumbnailElem.hidden = true;
 				//thumbnailElem.src = ``;
@@ -401,7 +403,7 @@ const primeNavigationButton = async function(state, doc, btn, direction) {
 
 const bindThumbnailsList = function(state, doc, scopeElem) {
 	let thumbs = scopeElem.getElementsByClassName(getThumbClass(state.domain));
-	console.log(`binding ${thumbs.length} thumbnail elements`);
+	console.log(`binding ${thumbs.length} thumbnail elements …`);
 	for (let thumb of thumbs) {
 		bindThumbnail(state, doc, thumb);};
 };
@@ -670,7 +672,7 @@ const tryGetPostInfo = async function(state, postId) {
 			break;
 
 		case `gelbooru` :
-			let xml = resp.responseXML;
+			let xml = httpResponseAsXml(resp);
 			if (!(xml instanceof Document)) {
 				return null;};
 
@@ -678,7 +680,6 @@ const tryGetPostInfo = async function(state, postId) {
 				state, xml.documentElement);
 			break;
 	};
-
 
 	if (info === null || info.postId !== postId) {
 		return null;};
@@ -726,7 +727,7 @@ const tryNavigatePostInfo = async function(
 			break;
 
 		case `gelbooru` :
-			let xml = resp.responseXML;
+			let xml = httpResponseAsXml(resp);
 			if (!(xml instanceof Document)) {
 				return null;};
 			info = singlePostInfoFromGelbooruApiPostsElem(
@@ -1201,6 +1202,11 @@ const postPageUrl = function(state, postId) {
 
 const requestTimeoutMs = 10000;
 
+const gmXmlHttpRequest =
+	typeof GM_xmlhttpRequest === `function` ? GM_xmlhttpRequest
+	: typeof GM !== `undefined` ? GM.xmlHttpRequest /* greasemonkey 4 */
+	: null;
+
 const tryHttpGet = async function(...args) {
 	try {
 		return await httpGet(...args);
@@ -1227,7 +1233,7 @@ const httpGet = function(url) {
 				return onFailure(resp);};
 		};
 
-		GM_xmlhttpRequest({
+		gmXmlHttpRequest({
 			method : `GET`,
 			url : url.href,
 			timeout : requestTimeoutMs,
@@ -1238,6 +1244,39 @@ const httpGet = function(url) {
 		});
 	});
 };
+
+const httpResponseAsXml = function(resp) {
+	/* resp.responseXML is not always available */
+
+	if (typeof resp !== `object`) {
+		return null;};
+
+	let xml = resp.responseXML;
+
+	if (typeof xml === `object`) {
+		return xml instanceof Document ? xml : null;};
+
+	return tryParseXml(resp.responseText);
+};
+
+test(_ => {
+	let src = `<asdf/>`;
+	let badSrc = `>as/df<`;
+	let doc = (new DOMParser).parseFromString(src, `application/xml`);
+	let f = httpResponseAsXml;
+
+	assert(f({}) === null);
+
+	assert(f({responseXML : null, responseText : src}) === null);
+	assert(f({responseXML : doc, responseText : src}) === doc);
+	assert(f({responseXML : doc, responseText : badSrc}) === doc);
+	assert(f({responseXML : {}, responseText : src}) === null);
+	assert(f({responseXML : src}) === null);
+
+	assert(f({responseText : doc}) === null);
+	assert(f({responseText : src}).documentElement.tagName === `asdf`);
+	assert(f({responseText : badSrc}) === null);
+});
 
 const getSingleElemByClass = function(scopeElem, className) {
 	dbg && assert(typeof className === `string`);
@@ -1339,6 +1378,89 @@ const tryParsePostId = function(s) {
 
 	return n | -invalid;
 };
+
+const tryParseXml = function(src) {
+	/* DOMParser.parseFromString() may return a <parsererror> document instead
+	of throwing when the input is malformed
+
+	while this solution seems to reliably identify malformed xml,
+	it unfortunately cannot prevent 'XML Parsing Error:' messages from being
+	written to the console */
+
+	if (typeof src !== `string`) {
+		return null;};
+
+	let key = `a`+Math.random().toString(32);
+
+	let doc = null;
+	try {
+		doc = (new DOMParser).parseFromString(
+			src+`<?${key}?>`, `application/xml`);
+	} catch (x) {};
+
+	if (!(doc instanceof Document)) {
+		return null;};
+
+	let lastNode = doc.lastChild;
+	if (!(lastNode instanceof ProcessingInstruction)
+		|| lastNode.target !== key
+		|| lastNode.data !== ``)
+	{
+		return null;};
+
+	doc.removeChild(lastNode);
+
+	return doc;
+};
+
+test(_ => {
+	assert(tryParseXml({}) === null);
+
+	for (let s of [
+		`<a/>`,
+		`<?xml version='1.0' encoding='UTF-8'?><a/>`,
+		`<a></a>`,
+		`<a/><?a?>`,
+		`<a/><!--a-->`,])
+	{
+		let a = tryParseXml(s);
+		assert(a !== null,
+			`well-malformed xml should parse successfully: ${s}`);
+
+		let x = (new DOMParser).parseFromString(s, `application/xml`);
+
+		let aString = (new XMLSerializer).serializeToString(a);
+		let xString = (new XMLSerializer).serializeToString(x);
+		assert(aString === xString);
+	};
+
+	for (let s of [
+		``,
+		`>a<`,
+		`<a`,
+		`<a a='`,
+		`<a></`,
+		`<a></a`,
+		`<a/>a`,
+		`<a/>\0`,
+		`a<a/>`,
+		`\0<a/>`,
+		`<a/><?a `,
+		`<a/><?a <!--`,
+		`<a/><?a <![CDATA[`,
+		`<a/>?>`,
+		`<!--a-->`,
+		`<a/><!--`,
+		`<![CDATA[`,
+		`<a><![CDATA[`,
+		`<?a?>`,
+		`<?xml version='1.0' encoding='UTF-8'?>`,
+		`<a/><?xml version='1.0' encoding='UTF-8'?>`,])
+	{
+		assert(tryParseXml(s) === null,
+			`malformed xml should fail to parse: ${s}`);
+	};
+});
 
 const escapeAttr = function(chars) {
 	let s = ``;
