@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name		Booru: Inline Gallery
 // @namespace	6930e44863619d3f19806f68f74dbf62
-// @version		2019-04-11
+// @version		2019-04-14
 // @downloadURL	https://github.com/bipface/userscripts/raw/master/booru-inline-gallery.user.js
 // @run-at		document-end
 // @grant		GM_xmlhttpRequest
@@ -20,45 +20,103 @@
 
 /*
 
-	known issues/limitations:
-		- not tested with rule34 default theme
-		- need proper svgErrorPlaceholder
-		- swf videos not supported yet
-		- on e621 it seems only one id:* search term can be specified
-			test: https://e621.net/post/index.json?tags=id:500%20id:%3E1000%20order:id&limit=1
-		- probably won't work with danbooru's zip-player videos
-			test: https://danbooru.donmai.us/posts/3471696
-		- controls typically end up off-screen; hinders navigation by clicking
-			(mainly affects mobile browsing)
-		- can't navigate when search query includes sort:* / order:*
-		- media type badge is misaligned on e621 thumbnails
-		- scale-mode 'full' doesn't seem to work well on r34xxx's mobile layout
-		- thumbnail appears even when full-size image loads from cache
-			(causes background 'flashing' when navigating
-			through images with transparent backgrounds)
-		- thumbnail may remain visible after the first frame of an animation is
-			fully rendered (noticible with alpha-transparent gifs)
-		- smooth scrollIntoView() can get erratic when navigating
-		- animated gif / video loses playback position when scale-mode changes
-		- player appears with wrong dimensions before video starts loading
-		- loading full-size images may not always be desirable
-			(e.g. mobile browsing with small data allowance)
-		- 2-tag search limit on danbooru breaks navigation
-		- placeholder SVG blocked by easylist (r34xxx/gelbooru)
-			prevents auto-scrolling to iv-panel
-		- can't show notes
-		- on some boorus, the first few posts of the default gallery may not
-			work due to the search database being up to 5 minutes behind
-			the main database
-		- post-ids cannot be greater than 2147483647
+known issues/limitations:
 
-	proposed enhancements:
-		- diagnostic logging
-		- something in the footer bar
-		- click the image for next/prev/scale
-		- stateAsFragment() should optimise away redundant fields
-		- post pages: add a link back to the gallery page on which it appears
+	- not tested with rule34 default theme
+	- need proper svgErrorPlaceholder
+	- swf videos not supported yet
+	- on e621 it seems only one id:* search term can be specified
+		test: https://e621.net/post/index.json?tags=id:500%20id:%3E1000%20order:id&limit=1
+	- probably won't work with danbooru's zip-player videos
+		test: https://danbooru.donmai.us/posts/3471696
+	- controls typically end up off-screen; hinders navigation by clicking
+		(mainly affects mobile browsing)
+	- can't navigate when search query includes sort:* / order:*
+	- media type badge is misaligned on e621 thumbnails
+	- scale-mode 'full' doesn't seem to work well on r34xxx's mobile layout
+	- thumbnail appears even when full-size image loads from cache
+		(causes background 'flashing' when navigating
+		through images with transparent backgrounds)
+	- thumbnail may remain visible after the first frame of an animation is
+		fully rendered (noticible with alpha-transparent gifs)
+	- scrollIntoView() can get erratic when navigating
+	- animated gif / video loses playback position when scale-mode changes
+	- player appears with wrong dimensions before video starts loading
+	- loading full-size images may not always be desirable
+		(e.g. mobile browsing with small data allowance)
+	- 2-tag search limit on danbooru breaks navigation
+	- placeholder SVG blocked by easylist (r34xxx/gelbooru)
+		prevents auto-scrolling to iv-panel
+	- notes
+		danbooru: /notes.json?search[post_id]=
+		gelbooru: /?page=dapi&s=note&q=index&post_id=
+			test: https://rule34.xxx/?page=post&s=list&tags=id:2269258
+	- on some boorus, the first few posts of the default gallery may not
+		work due to the search database being up to 5 minutes behind
+		the main database
+	- isPostId() limited to 2147483647
+	- tryParsePostId() imposes a much stricter syntax than the sites
+		themselves seem to,
+		for example,
+		the following addresses resolve to post 158:
+		https://rule34.xxx/?page=post&s=view&id=%2b158
+		https://rule34.xxx/?page=post&s=view&id=0158
+		https://rule34.xxx/?page=post&s=view&id=%23158
+		https://rule34.xxx/?page=post&s=view&id=%09158
+		the following address resolves to post 159:
+		https://rule34.xxx/?page=post&s=view&id=%20++%23+00158.99999999999999++
+		danbooru is similarly lenient
 
+proposed enhancements:
+
+	- more diagnostic logging
+	- something in the footer bar
+	- click the image for next/prev/scale
+	- stateAsFragment() should optimise away redundant fields
+	- post pages: add a link back to the gallery page on which it appears
+
+test cases:
+
+	environments:
+		- firefox 56, greasemonkey 3
+		- firefox 56, greasemonkey 4
+		- firefox current, greasemonkey 4
+		- firefox current, tampermonkey
+		- firefox android, ?
+		- chrome current, content-script (manifest.json)
+		- chrome current, tampermonkey
+
+	media:
+		- jpeg / png (static) / gif (static)
+		- png (animated) / gif (animated)
+		- webm / mp4 (?)
+			- controls visible, loop enabled, volume?
+		- swf
+		- zip-player
+		- sample may or may not exist
+
+	sites:
+		- rule34 (special-case for thumbnail urls,
+			special-case for getInlineViewParent)
+		- gelbooru (special-case for getInlineViewParent)
+		- yandere (special-case for thumbnail layout)
+		- e621 (special-case for thumbnail layout)
+
+	navigation:
+		- navigating before/after current search results list (across pages)
+		- attempting to navigate before first item or after last item
+		- id: / sort: / order: search terms
+		- 2 or more search terms (danbooru limitation)
+		- attempting to navigate with posts which aren't in solr database yet
+			(on gelbooru-type sites)
+		- navigate around, wait 1 minute for caches to expire, then
+			navigate some more
+
+	notes overlay:
+		- desktop
+		- mobile
+
+	...
 */
 
 /* -------------------------------------------------------------------------- */
@@ -231,40 +289,44 @@ const bindInlineView = async function(state, doc, view) {
 				href='${escapeAttr(closeHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 		</div>
+
 		<div class='${qual('iv-content-panel')}'>
 			<div class='${qual('iv-content-stack')}'>
-				<img class='${qual('iv-media')} ${qual('iv-image')}'
+				<div class='${qual('note-overlay')} ${qual('hidden')}'></div>
+
+				<img class='${qual('media')} ${qual('image')}'
 					hidden=''></img>
 
-				<video class='${qual('iv-media')} ${qual('iv-video')}'
+				<video class='${qual('media')} ${qual('video')}'
 					hidden='' controls='' loop=''></video>
 
-				<img class='${qual('iv-media-sample')}' hidden=''></img>
+				<img class='${qual('media-sample')}' hidden=''></img>
 
-				<img class='${qual('iv-media-thumbnail')}' hidden=''></img>
+				<img class='${qual('media-thumbnail')}' hidden=''></img>
 
-				<img class='${qual('iv-media-placeholder')}'></img>
+				<img class='${qual('media-placeholder')}'></img>
 			</div>
 		</div>
+
 		<div class='${qual('iv-footer')}'>
-			<!-- -->
+			<!-- todo -->
 		</div>`);
 
 	let stackElem = enforce(getSingleElemByClass(
 		view, qual(`iv-content-stack`)));
 
-	let imgElem = enforce(getSingleElemByClass(view, qual(`iv-image`)));
+	let imgElem = enforce(getSingleElemByClass(view, qual(`image`)));
 
-	let vidElem = enforce(getSingleElemByClass(view, qual(`iv-video`)));
+	let vidElem = enforce(getSingleElemByClass(view, qual(`video`)));
 
 	let sampleElem = enforce(getSingleElemByClass(
-		view, qual(`iv-media-sample`)));
+		view, qual(`media-sample`)));
 
 	let thumbnailElem = enforce(getSingleElemByClass(
-		view, qual(`iv-media-thumbnail`)));
+		view, qual(`media-thumbnail`)));
 
 	let phldrElem = enforce(getSingleElemByClass(
-		view, qual(`iv-media-placeholder`)));
+		view, qual(`media-placeholder`)));
 
 	let info = await tryGetPostInfo(state, state.currentPostId);
 
@@ -479,7 +541,7 @@ const getInlineView = function(state, parentElem) {
 
 const getInlineViewParent = function(state, doc) {
 	return getSingleElemByClass(doc, `content-post`) /* r34xxx */
-		|| getSingleElemByClass(doc, `content`) /* e621 */
+		|| getSingleElemByClass(doc, `content`) /* e621 / safebooru */
 		|| doc.getElementById(`content`) /* danbooru */
 		|| getSingleElemByClass(doc, `contain-push`) /* gelbooru */;
 };
@@ -636,7 +698,7 @@ const getForwardDanbooruTooltipEventsScriptText = `{
 		equivalent to native mouseover/mouseout events */
 };`;
 
-/* --- post info --- */
+/* --- post metadata --- */
 
 /*
 
@@ -644,6 +706,23 @@ const getForwardDanbooruTooltipEventsScriptText = `{
 	immutable attributes (file type, dimensions, etc.).
 
 */
+
+const ephemeralCacheExpireMs = 60000;
+
+const ephemeralCacheAssign = function(cache, key, val) {
+	dbg && assert(cache instanceof Map);
+
+	dbg && assert(val !== undefined,
+		`ephemeral cache entry value cannot be undefined`);
+
+	dbg && assert(!cache.has(key),
+		`cannot reassign unexpired ephemeral cache entry`);
+
+	cache.set(key, val);
+	setTimeout(
+		() => cache.delete(key),
+		ephemeralCacheExpireMs);
+};
 
 const postInfoTbl = new Map(); /* postId → postInfo */
 
@@ -658,7 +737,7 @@ const tryGetPostInfo = async function(state, postId) {
 	info = null;
 
 	let resp = await tryHttpGet(
-		requestPostInfoByIdUrl(state, postId));
+		requestPostInfoUrl(state, postId));
 	if (resp === null) {
 		return null;};
 
@@ -679,6 +758,9 @@ const tryGetPostInfo = async function(state, postId) {
 			info = singlePostInfoFromGelbooruApiPostsElem(
 				state, xml.documentElement);
 			break;
+
+		default :
+			dbg && assert(false);
 	};
 
 	if (info === null || info.postId !== postId) {
@@ -689,9 +771,43 @@ const tryGetPostInfo = async function(state, postId) {
 	return info;
 };
 
-const apiRequPostIdCache = new Map(); /* href → postId */
+const notesCache = new Map(); /* postId → array */
 
-const apiRequPostIdCacheExpireMs = 30000;
+const tryGetPostNotes = async function(state, postId) {
+	dbg && assert(isPostId(postId));
+
+	let notes = notesCache.get(postId);
+	if (notes !== undefined) {
+		dbg && assert(Array.isArray(notes));
+		return notes;};
+
+	let resp = await tryHttpGet(
+		requestPostNotesUrl(state, postId));
+	if (resp === null) {
+		return null;};
+
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			// todo
+			break;
+
+		case `gelbooru` :
+			// todo
+			break;
+
+		default :
+			dbg && assert(false);
+	};
+
+	if (!Array.isArray(notes)) {
+		return null;};
+
+	ephemeralCacheAssign(notesCache, postId, notes);
+
+	return notes;
+};
+
+const navigationRequCache = new Map(); /* href → result */
 
 const tryNavigatePostInfo = async function(
 	state, fromPostId, direction, searchQuery)
@@ -705,8 +821,9 @@ const tryNavigatePostInfo = async function(
 		return null;};
 
 	let cacheKey = requUrl.href;
-	let postId = apiRequPostIdCache.get(cacheKey);
-	if (isPostId(postId)) {
+	let postId = navigationRequCache.get(cacheKey);
+	if (postId !== undefined) {
+		dbg && assert(isPostId(postId));
 		let info = postInfoTbl.get(postId);
 		if (info !== undefined) {
 			dbg && assert(typeof info === `object`);
@@ -733,6 +850,9 @@ const tryNavigatePostInfo = async function(
 			info = singlePostInfoFromGelbooruApiPostsElem(
 				state, xml.documentElement);
 			break;
+
+		default :
+			dbg && assert(false);
 	};
 
 	if (info === null) {
@@ -748,10 +868,7 @@ const tryNavigatePostInfo = async function(
 
 	postInfoTbl.set(info.postId, info);
 
-	apiRequPostIdCache.set(cacheKey, info.postId);
-	setTimeout(
-		() => apiRequPostIdCache.delete(cacheKey),
-		apiRequPostIdCacheExpireMs);
+	ephemeralCacheAssign(navigationRequCache, cacheKey, info.postId);
 
 	return info;
 };
@@ -1025,11 +1142,15 @@ const isGalleryUrl = function(url) {
 					&& xs[0] === `post`
 					&& (xs.length === 1 || xs[1] === `index`);
 			};
+			break;
 
 		case `gelbooru` :
 			return (url.pathname === `/` || url.pathname === `/index.php`)
 				&& url.searchParams.get(`page`) === `post`
 				&& url.searchParams.get(`s`) === `list`;
+
+		default :
+			dbg && assert(false);
 	};
 
 };
@@ -1055,6 +1176,7 @@ const postIdFromUrl = function({domain}, url) {
 				if (xs !== null && xs[0] === `post` && xs[1] === `show`) {
 					return tryParsePostId(xs[2]);};
 			};
+			break;
 
 		case `gelbooru` :
 			if ((url.pathname === `/` || url.pathname === `/index.php`)
@@ -1063,6 +1185,10 @@ const postIdFromUrl = function({domain}, url) {
 			{
 				return tryParsePostId(url.searchParams.get(`id`));
 			};
+			break;
+
+		default :
+			dbg && assert(false);
 	};
 
 	return -1;
@@ -1072,7 +1198,7 @@ test(_ => {
 	// todo
 });
 
-const requestPostInfoByIdUrl = function(state, postId) {
+const requestPostInfoUrl = function(state, postId) {
 	dbg && assert(isPostId(postId));
 
 	let url = new URL(state.origin);
@@ -1097,9 +1223,29 @@ const requestPostInfoByIdUrl = function(state, postId) {
 			url.searchParams.set(`limit`, `1`);
 			url.searchParams.set(`tags`, `id:${postId}`);
 			return url;
-	};
 
-	return null;
+		default :
+			dbg && assert(false);
+	};
+};
+
+const requestPostNotesUrl = function(state, postId) {
+	dbg && assert(isPostId(postId));
+
+	let url = new URL(state.origin);
+
+	switch (getDomainKind(state)) {
+		case `danbooru` :
+			// todo
+			//return url;
+
+		case `gelbooru` :
+			// todo
+			//return url;
+
+		default :
+			dbg && assert(false);
+	};
 };
 
 const requestNavigatePostInfoUrl = function(
@@ -1152,9 +1298,10 @@ const requestNavigatePostInfoUrl = function(
 
 			return url;
 		};
-	};
 
-	return null;
+		default :
+			dbg && assert(false);
+	};
 };
 
 test(_ => {
@@ -1193,6 +1340,9 @@ const postPageUrl = function(state, postId) {
 			url.searchParams.set(`s`, `view`);
 			url.searchParams.set(`id`, `${postId}`);
 			return url;
+
+		default :
+			dbg && assert(false);
 	};
 
 	return null;
@@ -1200,12 +1350,17 @@ const postPageUrl = function(state, postId) {
 
 /* --- utilities --- */
 
-const requestTimeoutMs = 10000;
+const gmInfo =
+	typeof GM_info === `object` ? GM_info
+	: typeof GM !== `undefined` ? GM.info /* greasemonkey 4 */
+	: null;
 
 const gmXmlHttpRequest =
 	typeof GM_xmlhttpRequest === `function` ? GM_xmlhttpRequest
 	: typeof GM !== `undefined` ? GM.xmlHttpRequest /* greasemonkey 4 */
 	: null;
+
+const requestTimeoutMs = 10000;
 
 const tryHttpGet = async function(...args) {
 	try {
@@ -1240,8 +1395,7 @@ const httpGet = function(url) {
 			onload : onSuccess,
 			onabort : onFailure,
 			onerror : onFailure,
-			ontimeout : onFailure,
-		});
+			ontimeout : onFailure,});
 	});
 };
 
@@ -1392,13 +1546,15 @@ const tryParseXml = function(src) {
 
 	let key = `a`+Math.random().toString(32);
 
+	let parser = new DOMParser;
+
 	let doc = null;
 	try {
-		doc = (new DOMParser).parseFromString(
+		doc = parser.parseFromString(
 			src+`<?${key}?>`, `application/xml`);
 	} catch (x) {};
 
-	if (!(doc instanceof Document)) {
+	if (!(doc instanceof XMLDocument)) {
 		return null;};
 
 	let lastNode = doc.lastChild;
@@ -1410,57 +1566,35 @@ const tryParseXml = function(src) {
 
 	doc.removeChild(lastNode);
 
+	/* in some cases, chrome chooses to insert its <parsererror> into the root
+	element, leaving the rest of the document intact (including our processing
+	instruction).
+
+	see: chromium/src/third_party/blink/renderer/core/xml/parser/xml_errors.cc
+
+	however, chrome will never insert more than one <parsererror> element.
+	so to detect this case, we'll force an error which triggers this behaviour
+	and check whether the result has the same number of <parsererror> elements
+	as the previous result. */
+
+	let errElemCount =
+		doc.documentElement.getElementsByTagName(`parsererror`).length;
+	if (errElemCount !== 0) {
+		let errDoc = null;
+		try {
+			errDoc = parser.parseFromString(
+				src+`<?`, `application/xml`);
+		} catch (x) {};
+
+		if (!(errDoc instanceof XMLDocument)
+			|| errDoc.documentElement.getElementsByTagName(`parsererror`).length
+				=== errElemCount)
+		{
+			return null;};
+	};
+
 	return doc;
 };
-
-test(_ => {
-	assert(tryParseXml({}) === null);
-
-	for (let s of [
-		`<a/>`,
-		`<?xml version='1.0' encoding='UTF-8'?><a/>`,
-		`<a></a>`,
-		`<a/><?a?>`,
-		`<a/><!--a-->`,])
-	{
-		let a = tryParseXml(s);
-		assert(a !== null,
-			`well-malformed xml should parse successfully: ${s}`);
-
-		let x = (new DOMParser).parseFromString(s, `application/xml`);
-
-		let aString = (new XMLSerializer).serializeToString(a);
-		let xString = (new XMLSerializer).serializeToString(x);
-		assert(aString === xString);
-	};
-
-	for (let s of [
-		``,
-		`>a<`,
-		`<a`,
-		`<a a='`,
-		`<a></`,
-		`<a></a`,
-		`<a/>a`,
-		`<a/>\0`,
-		`a<a/>`,
-		`\0<a/>`,
-		`<a/><?a `,
-		`<a/><?a <!--`,
-		`<a/><?a <![CDATA[`,
-		`<a/>?>`,
-		`<!--a-->`,
-		`<a/><!--`,
-		`<![CDATA[`,
-		`<a><![CDATA[`,
-		`<?a?>`,
-		`<?xml version='1.0' encoding='UTF-8'?>`,
-		`<a/><?xml version='1.0' encoding='UTF-8'?>`,])
-	{
-		assert(tryParseXml(s) === null,
-			`malformed xml should fail to parse: ${s}`);
-	};
-});
 
 const escapeAttr = function(chars) {
 	let s = ``;
@@ -1476,6 +1610,10 @@ const escapeAttr = function(chars) {
 	};
 	return s;
 };
+
+test(_ => {
+	assert(escapeAttr(`>\udbff\udfff<`) === `&gt;\udbff\udfff&lt;`);
+});
 
 const maybeScrollIntoView = function(
 	viewport /* window */, el, behavior = `smooth`)
@@ -1622,6 +1760,9 @@ const getGlobalStyleRules = function(domain) {
 					: `hsla(0, 0%, 100%, 0.5)`};
 			--${qual('c-iv-action')} : hsl(33, 100%, 70%);
 			--${qual('c-ex-link')} : hsl(233, 100%, 75%);
+			--${qual('c-note-bg')} : hsla(0, 0%, 100%, 0.3);
+			--${qual('c-note-border')} : hsl(0, 0%, 0%);
+			--${qual('c-tooltip-bg')} : hsla(0, 0%, 100%, 0.5);
 		}`,
 
 		/* --- inline view --- */
@@ -1657,25 +1798,66 @@ const getGlobalStyleRules = function(domain) {
 			max-height : 100vh;
 		}`,
 
-		`.${qual('iv-content-stack')} > .${qual('iv-media')} {
+		`.${qual('iv-content-stack')} > .${qual('media')} {
 			z-index : 2;
 		}`,
 
-		`.${qual('iv-content-stack')} > .${qual('iv-media-sample')} {
+		`.${qual('iv-content-stack')} > .${qual('media-sample')} {
 			z-index : 1;
 		}`,
 
-		`.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')} {
+		`.${qual('iv-content-stack')} > .${qual('media-thumbnail')} {
 			z-index : 0;
 			opacity : 0.5;
 			filter : blur(7px);
 		}`,
 
-		`.${qual('iv-content-stack')} > .${qual('iv-media-sample')},
-		.${qual('iv-content-stack')} > .${qual('iv-media-thumbnail')}
+		`.${qual('iv-content-stack')} > .${qual('media-sample')},
+		.${qual('iv-content-stack')} > .${qual('media-thumbnail')}
 		{
 			width : auto;
 			height : 100%;
+		}`,
+
+		`.${qual('iv-content-stack')} > .${qual('note-overlay')} {
+			z-index : 3;
+			width : 100%;
+			height : 100%;
+		}`,
+
+		`.${qual('note-overlay')} {
+			position : relative;
+			/* don't obstruct interaction with underlying elements: */
+			visibility : hidden;
+		}`,
+
+		`.${qual('note-overlay')} > .${qual('note')} {
+			position : absolute;
+			visibility : visible;
+		}`,
+
+		`.${qual('note-overlay')}.${qual('hidden')} > .${qual('note')} {
+			display : none;
+		}`,
+
+		`.${qual('note')} {
+			background : var(--${qual('c-note-bg')});
+		}`,
+
+		`.${qual('note')} > .${qual('tooltip')} {
+			visibility : hidden;
+			position : absolute;
+			background : var(--${qual('c-tooltip-bg')});
+		}`,
+
+		`.${qual('note')}, .${qual('note')} > .${qual('tooltip')} {
+			border-style : solid;
+			border-width : 1px;
+			border-color : var(--${qual('c-note-border')});
+		}`,
+
+		`.${qual('note')}:hover > .${qual('tooltip')} {
+			visibility : visible;
 		}`,
 
 		`.${qual('iv-header')}, .${qual('iv-footer')} {
