@@ -49,6 +49,7 @@ known issues/limitations:
 		prevents auto-scrolling to iv-panel
 	- notes
 		danbooru: /notes.json?search[post_id]=
+			test: https://danbooru.donmai.us/posts?tags=id:3339117
 		gelbooru: /?page=dapi&s=note&q=index&post_id=
 			test: https://rule34.xxx/?page=post&s=list&tags=id:2269258
 	- on some boorus, the first few posts of the default gallery may not
@@ -253,6 +254,9 @@ const applyToDocument = function(doc) {
 const bindInlineView = async function(state, doc, view) {
 	dbg && assert(isPostId(state.currentPostId));
 
+	let infoPromise = tryGetPostInfo(state, state.currentPostId);
+	let notesPromise = tryGetPostNotes(state, state.currentPostId);
+
 	while (view.hasChildNodes()) {
 		view.removeChild(view.firstChild);};
 
@@ -272,21 +276,21 @@ const bindInlineView = async function(state, doc, view) {
 		`<div class='${qual('iv-header')} ${qual('iv-ctrls')}'>
 			<a title='Toggle Size'
 				class='${qual('scale')} ${qual(scaleBtnMode)}'
-				href='${escapeAttr(scaleHref)}'>
+				href='${xmlEscape(scaleHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 
 			<a title='Next' class='${qual('next')}' href='#'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 
 			<a title='#${state.currentPostId}' class='${qual('ex')}'
-				href='${escapeAttr(exHref)}'>
+				href='${xmlEscape(exHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 
 			<a title='Previous' class='${qual('prev')}' href='#'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 
 			<a title='Close' class='${qual('close')}'
-				href='${escapeAttr(closeHref)}'>
+				href='${xmlEscape(closeHref)}'>
 				<figure class='${qual('btn-icon')}'></figure></a>
 		</div>
 
@@ -328,8 +332,6 @@ const bindInlineView = async function(state, doc, view) {
 	let phldrElem = enforce(getSingleElemByClass(
 		view, qual(`media-placeholder`)));
 
-	let info = await tryGetPostInfo(state, state.currentPostId);
-
 	stackElem.classList.toggle(
 		qual('scale-fit'), state.scaleMode === `fit`);
 
@@ -347,6 +349,7 @@ const bindInlineView = async function(state, doc, view) {
 		phldrElem.addEventListener(`loadedmetadata`, f);
 	};
 
+	let info = await infoPromise;
 	if (info !== null) {
 		phldrElem.src = `data:image/svg+xml,`+encodeURIComponent(
 			svgEmptyPlaceholder(info.width, info.height));
@@ -383,6 +386,15 @@ const bindInlineView = async function(state, doc, view) {
 			imgElem.src = info.imageHref;
 			imgElem.hidden = false;
 		};
+
+		let notes = await notesPromise;
+		if (notes !== null && notes.length !== 0) {
+			let notesOvr = enforce(getSingleElemByClass(
+				view, qual(`note-overlay`)));
+			bindNotesOverlay(state, notesOvr, info, notes);
+			notesOvr.classList.remove(qual(`hidden`));
+		};
+
 	} else {
 		console.warn(
 			`failed to acquire metadata for current post`+
@@ -407,6 +419,46 @@ const bindInlineView = async function(state, doc, view) {
 	/* when closing, return to the corresponding thumbnail: */
 	closeBtn.addEventListener(`click`, () =>
 		onCloseInlineView(state, doc), false);
+};
+
+const bindNotesOverlay = function(state, ovr, postInfo, notes) {
+	dbg && assert(ovr instanceof Element);
+	dbg && assert(typeof postInfo === `object`);
+	dbg && assert(Array.isArray(notes));
+
+	while (ovr.hasChildNodes()) {
+		ovr.removeChild(ovr.firstChild);};
+
+	let {width, height} = postInfo;
+	if (!isInt(width) || !(width > 0)
+		|| !isInt(height) || !(height > 0))
+	{
+		return;};
+
+	let frag = ovr.ownerDocument.createDocumentFragment();
+	for (let note of notes) {
+		dbg && assert(typeof note.text === `string`);
+		if (note.x < 0 || note.x >= width
+			|| note.y < 0 || note.y >= height)
+		{
+			continue;};
+
+		let el = ovr.ownerDocument.createElement(`figure`);
+		el.insertAdjacentHTML(`beforeend`,
+			`<figcaption>${xmlEscape(note.text)}</figcaption>`);
+
+		el.style.left = `calc((${note.x} / ${width}) * 100%)`;
+		el.style.top = `calc((${note.y} / ${height}) * 100%)`;
+
+		let nw = Math.min(note.width, width - note.x);
+		el.style.width = `calc((${nw} / ${width}) * 100%)`;
+
+		let nh = Math.min(note.height, height - note.y);
+		el.style.height = `calc((${nh} / ${height}) * 100%)`;
+
+		frag.appendChild(el);
+	};
+	ovr.appendChild(frag);
 };
 
 const onCloseInlineView = function(state, doc) {
@@ -506,10 +558,10 @@ const ensureThumbnailOverlay = function(state, doc, thumb, extUrl) {
 
 	ovr.insertAdjacentHTML(`beforeend`,
 		`<a class='${qual('thumb-ex-link')}'
-			title='${escapeAttr(title)}'
-			href='${escapeAttr(extUrl.href)}'></a>
+			title='${xmlEscape(title)}'
+			href='${xmlEscape(extUrl.href)}'></a>
 		<a class='${qual('thumb-in-link')}'
-			title='${escapeAttr(title)}' href='#)}'></a>`);
+			title='${xmlEscape(title)}' href='#)}'></a>`);
 
 	thumb.prepend(ovr);
 
@@ -599,7 +651,7 @@ const thumbnailTitle = function(state, elem) {
 };
 
 const isPostId = function(id) {
-	return (id|0) === id && id >= 0;
+	return isInt(id) && id >= 0;
 };
 
 const domainKindOrderTermPrefixTbl = {
@@ -736,34 +788,49 @@ const tryGetPostInfo = async function(state, postId) {
 
 	info = null;
 
-	let resp = await tryHttpGet(
-		requestPostInfoUrl(state, postId));
+	let requUrl = requestPostInfoUrl(state, postId);
+	let resp = await tryHttpGet(requUrl);
 	if (resp === null) {
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
 	switch (getDomainKind(state)) {
 		case `danbooru` :
 			let respObj = tryParseJson(resp.responseText);
 			if (typeof respObj !== `object`) {
+				reportInvalidResponse(requUrl.href, resp);
 				return null;};
 
-			info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+			try {
+				info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		case `gelbooru` :
 			let xml = httpResponseAsXml(resp);
 			if (!(xml instanceof Document)) {
+				reportInvalidResponse(requUrl.href, resp);
 				return null;};
 
-			info = singlePostInfoFromGelbooruApiPostsElem(
-				state, xml.documentElement);
+			try {
+				info = singlePostInfoFromGelbooruApiPostsElem(
+					state, xml.documentElement);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		default :
 			dbg && assert(false);
 	};
 
-	if (info === null || info.postId !== postId) {
+	if (info === null) {
+		return null;};
+
+	if (info.postId !== postId) {
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
 	postInfoTbl.set(postId, info);
@@ -781,18 +848,30 @@ const tryGetPostNotes = async function(state, postId) {
 		dbg && assert(Array.isArray(notes));
 		return notes;};
 
-	let resp = await tryHttpGet(
-		requestPostNotesUrl(state, postId));
+	let requUrl = requestPostNotesUrl(state, postId);
+	let resp = await tryHttpGet(requUrl);
 	if (resp === null) {
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
+	notes = null;
 	switch (getDomainKind(state)) {
 		case `danbooru` :
 			// todo
 			break;
 
 		case `gelbooru` :
-			// todo
+			let xml = httpResponseAsXml(resp);
+			if (!(xml instanceof Document)) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
+
+			try {
+				notes = postNotesFromGelbooruApiNotesElem(
+					state, postId, xml.documentElement);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		default :
@@ -800,6 +879,7 @@ const tryGetPostNotes = async function(state, postId) {
 	};
 
 	if (!Array.isArray(notes)) {
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
 	ephemeralCacheAssign(notesCache, postId, notes);
@@ -832,6 +912,7 @@ const tryNavigatePostInfo = async function(
 
 	let resp = await tryHttpGet(requUrl);
 	if (resp === null) {
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
 	let info = null;
@@ -839,16 +920,28 @@ const tryNavigatePostInfo = async function(
 		case `danbooru` :
 			let respObj = tryParseJson(resp.responseText);
 			if (typeof respObj !== `object`) {
+				reportInvalidResponse(requUrl.href, resp);
 				return null;};
-			info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+
+			try {
+				info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		case `gelbooru` :
 			let xml = httpResponseAsXml(resp);
 			if (!(xml instanceof Document)) {
+				reportInvalidResponse(requUrl.href, resp);
 				return null;};
-			info = singlePostInfoFromGelbooruApiPostsElem(
-				state, xml.documentElement);
+
+			try {
+				info = singlePostInfoFromGelbooruApiPostsElem(
+					state, xml.documentElement);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		default :
@@ -864,6 +957,7 @@ const tryNavigatePostInfo = async function(
 		: info.postId <= fromPostId)
 	{
 		/* result takes us in the wrong direction */
+		reportInvalidResponse(requUrl.href, resp);
 		return null;};
 
 	postInfoTbl.set(info.postId, info);
@@ -874,15 +968,20 @@ const tryNavigatePostInfo = async function(
 };
 
 const singlePostInfoFromDanbooruApiPostsList = function(state, posts) {
+	/* no results → null,
+		malformed results → throw */
+
 	if (!Array.isArray(posts) || posts.length !== 1) {
+		throw new TypeError;};
+	if (posts.length === 0) {
 		return null;};
 
 	let post = posts[0];
-	if (typeof post !== `object` || post === null) {
-		return null;};
-
-	if (!isPostId(post.id)) {
-		return null;};
+	if (typeof post !== `object`
+		|| post === null
+		|| !isPostId(post.id))
+	{
+		throw new TypeError;};
 
 	let imageHref = post.file_url;
 
@@ -905,21 +1004,27 @@ const singlePostInfoFromDanbooruApiPostsList = function(state, posts) {
 };
 
 const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
+	/* no results → null,
+		malformed results → throw */
+
 	if (!(postsElem instanceof Element)
 		|| postsElem.tagName !== `posts`
-		|| postsElem.children.length !== 1)
+		|| postsElem.children.length > 1)
 	{
+		throw new TypeError;};
+
+	if (postsElem.children.length === 0) {
 		return null;};
 
 	let post = postsElem.children[0];
 	if (!(post instanceof Element)
 		|| post.tagName !== `post`)
 	{
-		return null;};
+		throw new TypeError;};
 
 	let postId = tryParsePostId(post.getAttribute(`id`));
 	if (!isPostId(postId)) {
-		return null;};
+		throw new TypeError;};
 
 	let imageHref = post.getAttribute(`file_url`);
 
@@ -951,6 +1056,46 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 		height : post.getAttribute(`height`)|0,};
 };
 
+const postNotesFromDanbooruApiNotesList = function(state, notes) {
+	/* no results → null,
+		malformed results → throw */
+
+	if (!Array.isArray(notes)) {
+		throw new TypeError;};
+
+	// todo
+
+	return null;
+};
+
+const postNotesFromGelbooruApiNotesElem = function(state, postId, notesElem) {
+	/* no results → null,
+		malformed results → throw */
+
+	dbg && assert(isPostId(postId));
+
+	if (!(notesElem instanceof Element)
+		|| notesElem.tagName !== `notes`)
+	{
+		throw new TypeError;};
+
+	let notes = [];
+
+	for (let el of notesElem.children) {
+		if (tryParsePostId(el.getAttribute(`post_id`)) !== postId) {
+			throw new Error;};
+
+		notes.push({
+			text : el.getAttribute(`body`),
+			x : el.getAttribute(`x`)|0,
+			y : el.getAttribute(`y`)|0,
+			width : el.getAttribute(`width`)|0,
+			height : el.getAttribute(`height`)|0,});
+	};
+
+	return notes;
+};
+
 const getMediaType = function(href) {
 	let type = `image`;
 
@@ -965,6 +1110,14 @@ const getMediaType = function(href) {
 	};
 
 	return type;
+};
+
+const reportInvalidResponse = function(href, resp) {
+	dbg && assert(typeof href === `string`);
+	dbg && assert(typeof resp === `object`);
+
+	console.error(`api request "${href}" returned invalid response:`,
+		resp === null ? `(null)` : resp.responseText);
 };
 
 /* --- urls --- */
@@ -1240,8 +1393,12 @@ const requestPostNotesUrl = function(state, postId) {
 			//return url;
 
 		case `gelbooru` :
-			// todo
-			//return url;
+			url.pathname = `/`;
+			url.searchParams.set(`page`, `dapi`);
+			url.searchParams.set(`s`, `note`);
+			url.searchParams.set(`q`, `index`);
+			url.searchParams.set(`post_id`, `${postId}`);
+			return url;
 
 		default :
 			dbg && assert(false);
@@ -1596,7 +1753,7 @@ const tryParseXml = function(src) {
 	return doc;
 };
 
-const escapeAttr = function(chars) {
+const xmlEscape = function(chars) {
 	let s = ``;
 	for (let c of chars) {
 		switch (c) {
@@ -1612,7 +1769,7 @@ const escapeAttr = function(chars) {
 };
 
 test(_ => {
-	assert(escapeAttr(`>\udbff\udfff<`) === `&gt;\udbff\udfff&lt;`);
+	assert(xmlEscape(`>\udbff\udfff<`) === `&gt;\udbff\udfff&lt;`);
 });
 
 const maybeScrollIntoView = function(
@@ -1722,6 +1879,10 @@ const assert = function(cond, msg = `assertion failed`) {
 	};
 };
 
+const isInt =  function(x) {
+	return (x|0) === x;
+};
+
 /* --- styles --- */
 
 const ensureApplyStyleRules = function(doc, getRules) {
@@ -1760,9 +1921,10 @@ const getGlobalStyleRules = function(domain) {
 					: `hsla(0, 0%, 100%, 0.5)`};
 			--${qual('c-iv-action')} : hsl(33, 100%, 70%);
 			--${qual('c-ex-link')} : hsl(233, 100%, 75%);
-			--${qual('c-note-bg')} : hsla(0, 0%, 100%, 0.3);
-			--${qual('c-note-border')} : hsl(0, 0%, 0%);
-			--${qual('c-tooltip-bg')} : hsla(0, 0%, 100%, 0.5);
+			--${qual('c-note-bg')} : hsla(60, 100%, 96.7%, 0.3);
+			--${qual('c-note-border')} : hsla(0, 0%, 0%, 0.3);
+			--${qual('c-note-caption')} : hsla(0, 0%, 10%, 1);
+			--${qual('c-note-caption-bg')} : hsla(60, 100%, 96.7%, 0.9);
 		}`,
 
 		/* --- inline view --- */
@@ -1773,6 +1935,17 @@ const getGlobalStyleRules = function(domain) {
 			align-items : center;
 			justify-content : flex-start;
 			min-height : calc(20rem + 50vh);
+		}`,
+
+		`.${qual('iv-header')}, .${qual('iv-footer')} {
+			max-width : 100vw;
+			width : 50rem;
+			min-height : 3rem;
+		}`,
+
+		`.${qual('iv-header')} > *, .${qual('iv-footer')} {
+			background-color : var(--${qual('c-base')});
+			opacity : 0.60;
 		}`,
 
 		`.${qual('iv-content-panel')} {
@@ -1831,44 +2004,41 @@ const getGlobalStyleRules = function(domain) {
 			visibility : hidden;
 		}`,
 
-		`.${qual('note-overlay')} > .${qual('note')} {
+		`.${qual('note-overlay')} > figure {
 			position : absolute;
 			visibility : visible;
-		}`,
-
-		`.${qual('note-overlay')}.${qual('hidden')} > .${qual('note')} {
-			display : none;
-		}`,
-
-		`.${qual('note')} {
+			margin : 0;
+			z-index : 0;
 			background : var(--${qual('c-note-bg')});
 		}`,
 
-		`.${qual('note')} > .${qual('tooltip')} {
-			visibility : hidden;
-			position : absolute;
-			background : var(--${qual('c-tooltip-bg')});
+		`.${qual('note-overlay')}.${qual('hidden')} > figure {
+			display : none;
 		}`,
 
-		`.${qual('note')}, .${qual('note')} > .${qual('tooltip')} {
+		`.${qual('note-overlay')} > figure > figcaption {
+			visibility : hidden;
+			position : absolute;
+			padding : 0.3rem;
+			top : calc(100% + 0.5rem);
+			color : var(--${qual('c-note-caption')});
+			background : var(--${qual('c-note-caption-bg')});
+		}`,
+
+		`.${qual('note-overlay')} > figure,
+		.${qual('note-overlay')} > figure > figcaption
+		{
 			border-style : solid;
 			border-width : 1px;
 			border-color : var(--${qual('c-note-border')});
 		}`,
 
-		`.${qual('note')}:hover > .${qual('tooltip')} {
+		`.${qual('note-overlay')} > figure:hover {
+			z-index : 1;
+		}`,
+
+		`.${qual('note-overlay')} > figure:hover > figcaption {
 			visibility : visible;
-		}`,
-
-		`.${qual('iv-header')}, .${qual('iv-footer')} {
-			max-width : 100vw;
-			width : 50rem;
-			min-height : 3rem;
-		}`,
-
-		`.${qual('iv-header')} > *, .${qual('iv-footer')} {
-			background-color : var(--${qual('c-base')});
-			opacity : 0.60;
 		}`,
 
 		/* --- controls --- */
