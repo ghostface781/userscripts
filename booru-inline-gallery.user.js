@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name		Booru: Inline Gallery
 // @namespace	6930e44863619d3f19806f68f74dbf62
-// @version		2019-04-14
+// @version		2019-04-18
 // @downloadURL	https://github.com/bipface/userscripts/raw/master/booru-inline-gallery.user.js
 // @run-at		document-end
 // @grant		GM_xmlhttpRequest
@@ -47,15 +47,11 @@ known issues/limitations:
 	- 2-tag search limit on danbooru breaks navigation
 	- placeholder SVG blocked by easylist (r34xxx/gelbooru)
 		prevents auto-scrolling to iv-panel
-	- notes
-		danbooru: /notes.json?search[post_id]=
-			test: https://danbooru.donmai.us/posts?tags=id:3339117
-		gelbooru: /?page=dapi&s=note&q=index&post_id=
-			test: https://rule34.xxx/?page=post&s=list&tags=id:2269258
 	- on some boorus, the first few posts of the default gallery may not
 		work due to the search database being up to 5 minutes behind
 		the main database
 	- isPostId() limited to 2147483647
+	- on danbooru: can only show up to 1000 notes for a single post (probably)
 	- tryParsePostId() imposes a much stricter syntax than the sites
 		themselves seem to,
 		for example,
@@ -70,8 +66,9 @@ known issues/limitations:
 
 proposed enhancements:
 
+	- spinner on the thumbnail overlay
 	- more diagnostic logging
-	- something in the footer bar
+	- more things in the footer bar
 	- click the image for next/prev/scale
 	- stateAsFragment() should optimise away redundant fields
 	- post pages: add a link back to the gallery page on which it appears
@@ -95,6 +92,9 @@ test cases:
 		- swf
 		- zip-player
 		- sample may or may not exist
+		- none
+			test:
+				https://rule34.xxx/index.php?page=post&s=list#inline-gallery:{"currentPostId"%3A59391120}
 
 	sites:
 		- rule34 (special-case for thumbnail urls,
@@ -116,6 +116,10 @@ test cases:
 	notes overlay:
 		- desktop
 		- mobile
+		test:
+			https://danbooru.donmai.us/posts?tags=id:3339117
+			https://e621.net/post/index/?tags=id:1843616
+			https://rule34.xxx/?page=post&s=list&tags=id:2269258
 
 	...
 */
@@ -254,7 +258,7 @@ const applyToDocument = function(doc) {
 const bindInlineView = async function(state, doc, view) {
 	dbg && assert(isPostId(state.currentPostId));
 
-	let infoPromise = tryGetPostInfo(state, state.currentPostId);
+	let infoPromise = tryGetPostInfo(state, state.currentPostId)
 	let notesPromise = tryGetPostNotes(state, state.currentPostId);
 
 	while (view.hasChildNodes()) {
@@ -296,7 +300,7 @@ const bindInlineView = async function(state, doc, view) {
 
 		<div class='${qual('iv-content-panel')}'>
 			<div class='${qual('iv-content-stack')}'>
-				<div class='${qual('note-overlay')} ${qual('hidden')}'></div>
+				<div class='${qual('note-overlay')}'></div>
 
 				<img class='${qual('media')} ${qual('image')}'
 					hidden=''></img>
@@ -309,11 +313,19 @@ const bindInlineView = async function(state, doc, view) {
 				<img class='${qual('media-thumbnail')}' hidden=''></img>
 
 				<img class='${qual('media-placeholder')}'></img>
+
+				<figure class='${qual('media-unavailable')}' hidden=''></figure>
 			</div>
 		</div>
 
-		<div class='${qual('iv-footer')}'>
-			<!-- todo -->
+		<div class='${qual('iv-footer')} ${qual('iv-ctrls')}'>
+			<a title='Toggle Notes' href=''
+				class='${qual('notes')} ${qual('disabled')}'>
+				<figure class='${qual('btn-icon')}'></figure></a>
+			<a class='${qual('disabled')}'></a>
+			<a class='${qual('disabled')}'></a>
+			<a class='${qual('disabled')}'></a>
+			<a class='${qual('disabled')}'></a>
 		</div>`);
 
 	let stackElem = enforce(getSingleElemByClass(
@@ -351,7 +363,7 @@ const bindInlineView = async function(state, doc, view) {
 
 	let info = await infoPromise;
 	if (info !== null) {
-		phldrElem.src = `data:image/svg+xml,`+encodeURIComponent(
+		phldrElem.src = svgDataHref(
 			svgEmptyPlaceholder(info.width, info.height));
 
 		if (info.thumbnailHref) {
@@ -392,7 +404,16 @@ const bindInlineView = async function(state, doc, view) {
 			let notesOvr = enforce(getSingleElemByClass(
 				view, qual(`note-overlay`)));
 			bindNotesOverlay(state, notesOvr, info, notes);
-			notesOvr.classList.remove(qual(`hidden`));
+
+			view.classList.add(qual(`notes-visible`));
+
+			let notesBtn = enforce(getSingleElemByClass(view, qual(`notes`)));
+			notesBtn.addEventListener(`click`, ev => {
+				view.classList.toggle(qual(`notes-visible`));
+				ev.preventDefault();
+				ev.stopPropagation();
+			}, false);
+			notesBtn.classList.remove(qual(`disabled`));
 		};
 
 	} else {
@@ -400,7 +421,12 @@ const bindInlineView = async function(state, doc, view) {
 			`failed to acquire metadata for current post`+
 			` (id:${state.currentPostId})`);
 
-		phldrElem.src = svgErrorPlaceholderHref;
+		let unavElem = enforce(getSingleElemByClass(
+			view, qual(`media-unavailable`)));
+
+		unavElem.style.backgroundImage = `url("${svgDataHref(
+			svgMediaUnavailable(state.currentPostId))}")`;
+		unavElem.hidden = false;
 	};
 
 	let prevBtn = enforce(getSingleElemByClass(view, qual(`prev`)));
@@ -797,10 +823,6 @@ const tryGetPostInfo = async function(state, postId) {
 	switch (getDomainKind(state)) {
 		case `danbooru` :
 			let respObj = tryParseJson(resp.responseText);
-			if (typeof respObj !== `object`) {
-				reportInvalidResponse(requUrl.href, resp);
-				return null;};
-
 			try {
 				info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
 			} catch (_) {
@@ -857,7 +879,13 @@ const tryGetPostNotes = async function(state, postId) {
 	notes = null;
 	switch (getDomainKind(state)) {
 		case `danbooru` :
-			// todo
+			let respObj = tryParseJson(resp.responseText);
+			try {
+				notes = postNotesFromDanbooruApiNotesList(
+					state, postId, respObj);
+			} catch (_) {
+				reportInvalidResponse(requUrl.href, resp);
+				return null;};
 			break;
 
 		case `gelbooru` :
@@ -919,10 +947,6 @@ const tryNavigatePostInfo = async function(
 	switch (getDomainKind(state)) {
 		case `danbooru` :
 			let respObj = tryParseJson(resp.responseText);
-			if (typeof respObj !== `object`) {
-				reportInvalidResponse(requUrl.href, resp);
-				return null;};
-
 			try {
 				info = singlePostInfoFromDanbooruApiPostsList(state, respObj);
 			} catch (_) {
@@ -993,6 +1017,12 @@ const singlePostInfoFromDanbooruApiPostsList = function(state, posts) {
 	if (thumbnailHref === imageHref) {
 		thumbnailHref = undefined;};
 
+	let md5 = post.md5;
+	if (typeof md5 === `string` && /^[0-9a-fA-F]{32}$/.test(md5)) {
+		md5 = md5.toLowerCase();
+	} else {
+		md5 = undefined;};
+
 	return {
 		postId : post.id,
 		type : getMediaType(imageHref),
@@ -1000,7 +1030,8 @@ const singlePostInfoFromDanbooruApiPostsList = function(state, posts) {
 		sampleHref,
 		thumbnailHref,
 		width : (post.image_width || post.width)|0,
-		height : (post.image_height || post.height)|0,};
+		height : (post.image_height || post.height)|0,
+		md5,};
 };
 
 const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
@@ -1046,6 +1077,10 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 		};
 	};
 
+	let md5 = post.getAttribute(`md5`).toLowerCase();
+	if (!/^[0-9a-f]{32}$/.test(md5)) {
+		md5 = undefined;};
+
 	return {
 		postId,
 		type : getMediaType(imageHref),
@@ -1053,19 +1088,36 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 		sampleHref,
 		thumbnailHref,
 		width : post.getAttribute(`width`)|0,
-		height : post.getAttribute(`height`)|0,};
+		height : post.getAttribute(`height`)|0,
+		md5,};
 };
 
-const postNotesFromDanbooruApiNotesList = function(state, notes) {
+const postNotesFromDanbooruApiNotesList = function(state, postId, rawNotes) {
 	/* no results → null,
 		malformed results → throw */
 
-	if (!Array.isArray(notes)) {
+	if (!Array.isArray(rawNotes)) {
 		throw new TypeError;};
 
-	// todo
+	let notes = [];
 
-	return null;
+	for (let raw of rawNotes) {
+		if (raw.post_id !== postId) {
+			throw new Error;};
+		if (typeof raw.body !== `string`) {
+			throw new TypeError;};
+		if (raw.is_active === false) {
+			continue;};
+
+		notes.push({
+			text : raw.body,
+			x : raw.x|0,
+			y : raw.y|0,
+			width : raw.width|0,
+			height : raw.height|0,});
+	};
+
+	return notes;
 };
 
 const postNotesFromGelbooruApiNotesElem = function(state, postId, notesElem) {
@@ -1389,8 +1441,16 @@ const requestPostNotesUrl = function(state, postId) {
 
 	switch (getDomainKind(state)) {
 		case `danbooru` :
-			// todo
-			//return url;
+			if (state.domain === `danbooru`) {
+				url.pathname = `/notes.json`;
+				url.searchParams.set(`search[post_id]`, `${postId}`);
+				url.searchParams.set(`search[is_active]`, `true`);
+				url.searchParams.set(`limit`, `1000`);
+			} else {
+				url.pathname = `/note/index.json`;
+				url.searchParams.set(`post_id`, `${postId}`);};
+
+			return url;
 
 		case `gelbooru` :
 			url.pathname = `/`;
@@ -1533,7 +1593,7 @@ const httpGet = function(url) {
 	return new Promise((resolve, reject) => {
 		let onFailure = function(resp) {
 			return reject(new Error(
-				`GET request to ${url.href} failed with status `
+				`GET request "${url.href}" failed with status `
 				+`"${resp.statusText}"`));
 		};
 
@@ -1919,12 +1979,15 @@ const getGlobalStyleRules = function(domain) {
 				${darkTheme
 					? `hsla(0, 0%, 30%, 0.5)`
 					: `hsla(0, 0%, 100%, 0.5)`};
+			--${qual('c-iv-bg')} : hsl(232, 17%, 46%);
+			--${qual('r-iv-inact-opacity')} : 0.6;
 			--${qual('c-iv-action')} : hsl(33, 100%, 70%);
 			--${qual('c-ex-link')} : hsl(233, 100%, 75%);
 			--${qual('c-note-bg')} : hsla(60, 100%, 96.7%, 0.3);
 			--${qual('c-note-border')} : hsla(0, 0%, 0%, 0.3);
 			--${qual('c-note-caption')} : hsla(0, 0%, 10%, 1);
-			--${qual('c-note-caption-bg')} : hsla(60, 100%, 96.7%, 0.9);
+			--${qual('c-note-caption-bg')} : hsla(60, 100%, 96.7%, 0.95);
+			--${qual('d-iv-width')} : 50rem;
 		}`,
 
 		/* --- inline view --- */
@@ -1939,13 +2002,15 @@ const getGlobalStyleRules = function(domain) {
 
 		`.${qual('iv-header')}, .${qual('iv-footer')} {
 			max-width : 100vw;
-			width : 50rem;
+			width : var(--${qual('d-iv-width')});
 			min-height : 3rem;
 		}`,
 
-		`.${qual('iv-header')} > *, .${qual('iv-footer')} {
+		`.${qual('iv-header')} > *,
+		.${qual('iv-footer')} > *
+		{
 			background-color : var(--${qual('c-base')});
-			opacity : 0.60;
+			opacity : var(--${qual('r-iv-inact-opacity')});
 		}`,
 
 		`.${qual('iv-content-panel')} {
@@ -1992,6 +2057,17 @@ const getGlobalStyleRules = function(domain) {
 			height : 100%;
 		}`,
 
+		`.${qual('iv-content-stack')} > .${qual('media-unavailable')} {
+			margin : 0;
+			width : var(--${qual('d-iv-width')});
+			height : 20rem;
+			background-color : var(--${qual('c-iv-bg')});
+			background-size : 70%;
+			background-repeat : no-repeat;
+			background-position : center;
+			opacity : 0.75;
+		}`,
+
 		`.${qual('iv-content-stack')} > .${qual('note-overlay')} {
 			z-index : 3;
 			width : 100%;
@@ -2012,7 +2088,17 @@ const getGlobalStyleRules = function(domain) {
 			background : var(--${qual('c-note-bg')});
 		}`,
 
-		`.${qual('note-overlay')}.${qual('hidden')} > figure {
+		`.${qual('note-overlay')} > figure,
+		.${qual('note-overlay')} > figure > figcaption
+		{
+			border-style : solid;
+			border-width : 1px;
+			border-color : var(--${qual('c-note-border')});
+		}`,
+
+		`.${qual('iv-panel')}:not(.${qual('notes-visible')})
+			.${qual('note-overlay')} > figure
+		{
 			display : none;
 		}`,
 
@@ -2021,16 +2107,9 @@ const getGlobalStyleRules = function(domain) {
 			position : absolute;
 			padding : 0.3rem;
 			top : calc(100% + 0.5rem);
+			border-color : var(--${qual('c-note-caption')});
 			color : var(--${qual('c-note-caption')});
 			background : var(--${qual('c-note-caption-bg')});
-		}`,
-
-		`.${qual('note-overlay')} > figure,
-		.${qual('note-overlay')} > figure > figcaption
-		{
-			border-style : solid;
-			border-width : 1px;
-			border-color : var(--${qual('c-note-border')});
 		}`,
 
 		`.${qual('note-overlay')} > figure:hover {
@@ -2061,7 +2140,10 @@ const getGlobalStyleRules = function(domain) {
 			justify-content : center;
 		}`,
 
-		`.${qual('iv-ctrls')} > a:hover {
+		`.${qual('iv-ctrls')} > a:hover,
+		.${qual('iv-panel')}.${qual('notes-visible')}
+			.${qual('iv-ctrls')} > .${qual(`notes`)}
+		{
 			opacity : 1;
 		}`,
 
@@ -2113,10 +2195,19 @@ const getGlobalStyleRules = function(domain) {
 			background-image : url(${svgCircleArrowUpHref});
 		}`,
 
-		`.${qual('iv-ctrls')} > .${qual('prev')}.${qual('pending')},
-		.${qual('iv-ctrls')} > .${qual('prev')}.${qual('disabled')},
-		.${qual('iv-ctrls')} > .${qual('next')}.${qual('pending')},
-		.${qual('iv-ctrls')} > .${qual('next')}.${qual('disabled')}
+		`.${qual('iv-ctrls')} > .${qual('notes')} > .${qual('btn-icon')} {
+			background-image : url(${svgCircleNoteHref});
+		}`,
+
+		`.${qual('iv-panel')}:not(.${qual('notes-visible')})
+			.${qual('iv-ctrls')} > .${qual('notes')}:hover
+			> .${qual('btn-icon')}
+		{
+			opacity : var(--${qual('r-iv-inact-opacity')});
+		}`,
+
+		`.${qual('iv-ctrls')} > .${qual('pending')},
+		.${qual('iv-ctrls')} > .${qual('disabled')}
 		{
 			pointer-events : none;
 		}`,
@@ -2240,15 +2331,35 @@ const svgBlobHref = function(src) {
 		new Blob([src], {type : `image/svg+xml`}));
 };
 
+const svgDataHref = function(src) {
+	return `data:image/svg+xml,`+encodeURIComponent(src);
+};
+
 const svgEmptyPlaceholder = function(w, h) {
 	return `<svg xmlns='http://www.w3.org/2000/svg'`
 		+` width='${w|0}' height='${h|0}'><path/></svg>`;
 };
 
-const svgErrorPlaceholderHref = svgBlobHref(
-	`<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'>
-		<rect x='0' y='0' width='100' height='100' fill='#f0f'/>
-	</svg>`);
+const svgMediaUnavailable = function(postId) {
+	dbg && assert(isPostId(postId));
+
+	return `<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='380'>
+		<g fill='#fff'>
+			<path d='M29 0C13 0 0 13 0 29v322c0 16 13 29 29 29h242c16 0 29-13
+				29-29V116L189 0zm0 26h149l96 100v225c0 3 0 3-3 3H29c-3
+				0-3 0-3-3V29c0-3 0-3 3-3z'/>
+			<path d='M183 6l-12 7v90c0 8 3 16 8 22 6 6 14 9 23 9h90zm13 39l61
+				63h-55l-4-1c-1-1-2-1-2-4z'/>
+		</g>
+		<path fill='#fff' d='M150 227l-37 37-17-18 37-36-37-36 17-18 37 37 36-37
+			18 18-37 36 37 36-18 18z'/>
+		<text x='346' y='172' fill='#fff' font-size='67' font-weight='400'
+			font-family='Helvetica,Arial,Tahoma,Liberation Sans,sans-serif'>
+			<tspan x='346' y='172'>id:${postId}</tspan>
+			<tspan x='346' y='255'>metadata unavailable</tspan>
+		</text>
+	</svg>`;
+};
 
 const svgCircleArrow = function(rot = 0) {
 	return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72'>
@@ -2314,16 +2425,36 @@ const svgCircleSpinnerHref = svgBlobHref(
 		<path fill='#fff' opacity='.875' d='M16.566 16.566A27.5 27.5 0 0 0 8.5
 			36h5a22.5 22.5 0 0 1 6.6-15.9z'/>
 
-		<!--animateTransform
+		<!-- <animateTransform
 			attributeName='transform'
 			attributeType='XML'
 			type='rotate'
 			from='0 0 0'
 			to='360 0 0'
 			dur='1s'
-			repeatCount='indefinite'/-->
+			repeatCount='indefinite'/> -->
 		<!-- svg animation is too expensive - use css animation instead -->
 	</svg>`);
+
+const svgCircleNoteHref = svgBlobHref(
+	`<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>
+		<path fill='#fff' d='M36 0A36 36 0 0 0 0 36a36 36 0 0 0 36 36 36 36 0
+			0 0 36-36A36 36 0 0 0 36 0zm14.727 18.45l2.54 29.048-2.945
+			3.51-29.049 2.543-2.54-29.049 2.945-3.51 29.049-2.543zM35.563
+			32.876c.256-.161-6.211 4.225-12.694 1.73.737 8.421 9.125 14.663
+			21.192 13.698-8.656-3.156-8.412-15.205-8.498-15.428z'/>
+	</svg>`);
+
+/*const svgCircleNoteHref = svgBlobHref(
+	`<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>
+		<path fill='#fff' d='M36 0C16.118 0 0 16.118 0 36s16.118 36 36 36
+			36-16.118 36-36S55.882 0 36 0zm0 8.5A27.5 27.5 0 0 1 63.5 36 27.5
+			27.5 0 0 1 36 63.5 27.5 27.5 0 0 1 8.5 36 27.5 27.5 0 0 1 36
+			8.5zm14.727 9.95l-29.05 2.542-2.945 3.51 2.541 29.049 29.05-2.543
+			2.945-3.51-2.541-29.049zM35.563 32.876c.086.223-.158 12.272 8.498
+			15.428-12.067.965-20.455-5.277-21.192-13.698 6.483 2.495
+			12.95-1.891 12.694-1.73z'/>
+	</svg>`);*/
 
 const svgCircleExpandHref = svgBlobHref(
 	`<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>
