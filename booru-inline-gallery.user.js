@@ -23,7 +23,7 @@
 known issues/limitations:
 
 	- not tested with rule34 default theme
-	- need proper svgErrorPlaceholder
+	- thumbnail overlay covers the drop-down menu on rule34 mobile layout
 	- swf videos not supported yet
 	- on e621 it seems only one id:* search term can be specified
 		test: https://e621.net/post/index.json?tags=id:500%20id:%3E1000%20order:id&limit=1
@@ -549,6 +549,7 @@ const bindThumbnailsList = function(state, doc, scopeElem) {
 };
 
 const bindThumbnail = function(state, doc, thumb) {
+	dbg && assert(thumb instanceof HTMLElement);
 	let info = thumbnailInfo(state, thumb);
 	if (info === null) {
 		return;};
@@ -556,7 +557,7 @@ const bindThumbnail = function(state, doc, thumb) {
 	thumb.classList.toggle(qual(`selected`),
 		info.postId === state.currentPostId);
 
-	let ovr = ensureThumbnailOverlay(state, doc, thumb, info.url);
+	let ovr = ensureThumbnailOverlay(state, doc, thumb, info);
 	if (ovr !== null) {
 		let inLink = enforce(getSingleElemByClass(ovr, qual('thumb-in-link')));
 
@@ -570,8 +571,10 @@ const bindThumbnail = function(state, doc, thumb) {
 	};
 };
 
-const ensureThumbnailOverlay = function(state, doc, thumb, extUrl) {
-	enforce(thumb instanceof HTMLElement);
+const ensureThumbnailOverlay = function(state, doc, thumb, info) {
+	dbg && assert(thumb instanceof HTMLElement);
+	dbg && assert(typeof info === `object`);
+	dbg && assert(isPostId(info.postId));
 
 	let ovr = getSingleElemByClass(thumb, qual(`thumb-overlay`));
 	if (ovr !== null) {
@@ -579,13 +582,14 @@ const ensureThumbnailOverlay = function(state, doc, thumb, extUrl) {
 
 	ovr = doc.createElement(`div`);
 	ovr.classList.add(qual(`thumb-overlay`));
+	ovr.classList.add(qual(`thumb-overlay-${info.postId}`));
 
 	let title = thumbnailTitle(state, thumb);
 
 	ovr.insertAdjacentHTML(`beforeend`,
 		`<a class='${qual('thumb-ex-link')}'
 			title='${xmlEscape(title)}'
-			href='${xmlEscape(extUrl.href)}'></a>
+			href='${xmlEscape(info.url.href)}'></a>
 		<a class='${qual('thumb-in-link')}'
 			title='${xmlEscape(title)}' href='#)}'></a>`);
 
@@ -1093,7 +1097,7 @@ const singlePostInfoFromGelbooruApiPostsElem = function(state, postsElem) {
 };
 
 const postNotesFromDanbooruApiNotesList = function(state, postId, rawNotes) {
-	/* no results → null,
+	/* no results → [],
 		malformed results → throw */
 
 	if (!Array.isArray(rawNotes)) {
@@ -1121,7 +1125,7 @@ const postNotesFromDanbooruApiNotesList = function(state, postId, rawNotes) {
 };
 
 const postNotesFromGelbooruApiNotesElem = function(state, postId, notesElem) {
-	/* no results → null,
+	/* no results → [],
 		malformed results → throw */
 
 	dbg && assert(isPostId(postId));
