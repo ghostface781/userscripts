@@ -3,7 +3,7 @@
 // @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://*.pixiv.net/member_illust.php?*
-// @version     2018-12-03
+// @version     2019-05-14
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-animation-converter.user.js
 // @run-at      document-start
 // @grant       none
@@ -433,29 +433,27 @@ const findMainCanvas = () => {
 
 	for (let canv of document.getElementsByTagName(`canvas`)) {
 		let parent = canv.parentElement;
-		if (!(parent instanceof HTMLDivElement)) {continue;};
+		if (!(parent instanceof HTMLElement)) {continue;};
 
-		let stateNode;
+		let stateNode = null;
 		{
-			let ks = Object.keys(parent).filter(k =>
-				k.startsWith(`__reactInternalInstance`));
+			let ks = Object.keys(parent.parentElement || {})
+				.filter(k => k.startsWith(`__reactInternalInstance`));
 			if (ks.length !== 1) {continue;};
 
-			let reactInst = parent[ks[0]];
-			if (!reactInst) {continue;};
-			reactInst = reactInst[`return`];
-			if (!reactInst) {continue;};
-			stateNode = reactInst.stateNode;
+			try {
+				stateNode = parent.parentElement[ks[0]].child.stateNode;
+			} catch (_) {};
+
 			if (!stateNode) {continue;};
 		};
 
 		if (!stateNode.zipPlayer) {continue;};
-		if (!(stateNode.ref instanceof HTMLCanvasElement)) {continue;};
 
-		return ({
-			canvas : stateNode.ref,
+		return {
+			canvas : canv,
 			props : stateNode.props,
-			player : stateNode.zipPlayer,});
+			player : stateNode.zipPlayer,};
 	};
 
 	return null;
