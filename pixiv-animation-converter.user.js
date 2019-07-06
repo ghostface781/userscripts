@@ -3,7 +3,7 @@
 // @description Convert Pixiv animation sequences to APNG files.
 // @namespace   6930e44863619d3f19806f68f74dbf62
 // @match       *://*.pixiv.net/member_illust.php?*
-// @version     2019-05-14
+// @version     2019-07-06
 // @downloadURL https://github.com/bipface/userscripts/raw/master/pixiv-animation-converter.user.js
 // @run-at      document-start
 // @grant       none
@@ -494,11 +494,7 @@ const onMainCanvas = (anim) => {
 	console.log(`pixiv animation converter: main canvas acquired`);
 	console.log(anim.canvas);
 
-	let canvContainer = anim.canvas.parentElement.parentElement;
-
-	canvContainer
-		.parentElement
-		.querySelector(`.${canvContainer.className} ~ * section`)
+	anim.canvas.parentElement
 		.append(create_convert_button(anim));
 };
 
